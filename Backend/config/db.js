@@ -40,6 +40,7 @@ const connectDB = async () => {
 
     // Await the asynchronous database connection using the parsed URI configuration.
     await mongoose.connect(mongoUri);
+
   } catch (err) {
     // If the initial connection fails, log it and terminate the process to prevent running in an unstable state.
     console.error('❌ MongoDB initial connection failed:', err);
@@ -54,7 +55,7 @@ const connectDB = async () => {
     redisClient = new Redis(redisUrl, {
       // Must set maxRetriesPerRequest to null if using BullMQ or similar structures; also avoids throwing unhandled errors immediately on retry thresholds.
       maxRetriesPerRequest: null,
-      
+
       // Define a custom retry strategy: exponential backoff that limits max wait time to 2000 milliseconds (2 seconds).
       retryStrategy(times) {
         const delay = Math.min(times * 50, 2000);
@@ -92,13 +93,13 @@ const connectDB = async () => {
 module.exports = {
   // Method to establish the connections.
   connectDB,
-  
+
   // Getter function to retrieve the active Redis client safely.
   getRedisClient: () => redisClient,
-  
+
   // Setter function allowing test harnesses to mock or inject custom Redis configurations.
   setRedisClient: (client) => { redisClient = client; },
-  
+
   // Expose Mongoose instance directly.
   mongoose
 };

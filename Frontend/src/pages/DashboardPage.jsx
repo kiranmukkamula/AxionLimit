@@ -1,0 +1,330 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts';
+import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../components/Toast';
+import {
+  getStats, resetStats,
+  getApiKeys, createApiKey, deleteApiKey as deleteKey
+} from '../api/client';
+
+// ─── Stat Card ─────────────────────────────────────────────────────────────
+function StatCard({ label, value, colorClass, icon, sub }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-label">{label}</div>
+      <div className={`stat-value ${colorClass}`}>{value.toLocaleString()}</div>
+      <div className="stat-footer">
+        <span>{icon} {sub}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Leaderboard ────────────────────────────────────────────────────────────
+function Leaderboard({ title, items }) {
+  const max = items[0]?.value || 1;
+  return (
+    <div className="card" style={{ height: '100%' }}>
+      <div className="panel-title">{title}</div>
+      {items.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📭</div>
+          <div>No data yet. Make some API requests!</div>
+        </div>
+      ) : (
+        items.map((item, i) => (
+          <div key={i} className="leaderboard-row">
+            <div className={`leaderboard-rank ${i < 3 ? 'top' : ''}`}>{i + 1}</div>
+            <div className="leaderboard-name">{item.name}</div>
+            <div className="leaderboard-bar-wrap">
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${(item.value / max) * 100}%` }} />
+              </div>
+            </div>
+            <div className="leaderboard-count">{item.value}</div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+// ─── Key Item ───────────────────────────────────────────────────────────────
+function KeyItem({ k, onDelete, onCopy }) {
+  const [revealed, setRevealed] = useState(false);
+
+  const censor = (key) => key.slice(0, 6) + '•'.repeat(16) + key.slice(-4);
+
+  return (
+    <div className="key-item">
+      <div className="key-meta">
+        <div className="key-name">{k.name}</div>
+        <div className="key-string-row">
+          <span className="key-string">{revealed ? k.key : censor(k.key)}</span>
+          <button className="btn-icon" onClick={() => setRevealed(r => !r)} title="Toggle visibility">
+            {revealed ? '🙈' : '👁'}
+          </button>
+          <button className="btn-icon" onClick={() => onCopy(k.key)} title="Copy Key">📋</button>
+        </div>
+      </div>
+      <div className="key-actions">
+        <span className="badge badge-accent" style={{ flexShrink: 0 }}>
+          {k.rateLimit.limit}r / {k.rateLimit.windowMs / 1000}s
+        </span>
+        <button className="btn-icon danger" onClick={() => onDelete(k._id)} title="Revoke">🗑</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Create Key Form ─────────────────────────────────────────────────────────
+function CreateKeyForm({ onCreated }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [limit, setLimit] = useState(100);
+  const [windowMs, setWindowMs] = useState(60000);
+  const [loading, setLoading] = useState(false);
+
+  const handleCreate = async () => {
+    setLoading(true);
+    try {
+      await createApiKey({ name, limit: parseInt(limit), windowMs: parseInt(windowMs) });
+      toast('API Key created!', 'success');
+      setName(''); setLimit(100); setWindowMs(60000); setOpen(false);
+      onCreated();
+    } catch (err) {
+      toast(err.response?.data?.error || 'Failed to create key.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      {!open ? (
+        <button className="btn btn-primary btn-sm" onClick={() => setOpen(true)}>
+          + New API Key
+        </button>
+      ) : (
+        <div className="create-key-form">
+          <div>
+            <label className="label">Key Name</label>
+            <input className="input" placeholder="e.g. Production Mobile" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <div className="form-row">
+            <div>
+              <label className="label">Request Limit</label>
+              <input className="input" type="number" min={1} value={limit} onChange={e => setLimit(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Window (ms)</label>
+              <input className="input" type="number" min={1000} step={1000} value={windowMs} onChange={e => setWindowMs(e.target.value)} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={loading || !name}>
+              {loading ? 'Creating...' : 'Create Key'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Custom Tooltip ─────────────────────────────────────────────────────────
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: 'var(--bg-card)', border: '1px solid var(--border)',
+      borderRadius: 8, padding: '10px 14px', fontSize: '0.8125rem'
+    }}>
+      <div style={{ color: 'var(--text-muted)', marginBottom: 6 }}>Tick {label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color, fontWeight: 600 }}>{p.name}: {p.value}</div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+export default function DashboardPage() {
+  const { theme } = useTheme();
+  const toast = useToast();
+
+  const [stats, setStats] = useState({ total: 0, allowed: 0, blocked: 0, topUsers: [], topEndpoints: [] });
+  const [chartData, setChartData] = useState([]);
+  const [prevStats, setPrevStats] = useState(null);
+  const [tickIndex, setTickIndex] = useState(0);
+
+  const [keys, setKeys] = useState([]);
+  const [keysLoading, setKeysLoading] = useState(true);
+
+  const accentColor = theme === 'dark' ? '#BCFE44' : '#2563EB';
+  const gridColor = theme === 'dark' ? '#222' : '#E5E7EB';
+  const textColor = theme === 'dark' ? '#888' : '#9CA3AF';
+
+  // Load API Keys
+  const loadKeys = useCallback(async () => {
+    try {
+      const res = await getApiKeys();
+      setKeys(res.data.keys || []);
+    } catch {
+      toast('Failed to load API keys.', 'error');
+    } finally {
+      setKeysLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadKeys(); }, [loadKeys]);
+
+  // Poll stats every 4 seconds
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await getStats();
+        const s = res.data.stats;
+        setStats(s);
+
+        setChartData(prev => {
+          const newPoint = {
+            tick: tickIndex,
+            Allowed: s.allowed,
+            Blocked: s.blocked,
+          };
+          const next = [...prev, newPoint];
+          return next.slice(-20); // Keep last 20 ticks
+        });
+        setTickIndex(i => i + 1);
+        setPrevStats(s);
+      } catch { /* silent */ }
+    };
+
+    poll();
+    const id = setInterval(poll, 4000);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleDelete = async (id) => {
+    try {
+      await deleteKey(id);
+      toast('API key revoked.', 'success');
+      loadKeys();
+    } catch (err) {
+      toast(err.response?.data?.error || 'Failed to delete key.', 'error');
+    }
+  };
+
+  const handleCopy = (key) => {
+    navigator.clipboard.writeText(key);
+    toast('Key copied to clipboard!', 'success');
+  };
+
+  const handleReset = async () => {
+    try {
+      await resetStats();
+      setChartData([]);
+      setTickIndex(0);
+      setStats({ total: 0, allowed: 0, blocked: 0, topUsers: [], topEndpoints: [] });
+      toast('Analytics reset!', 'success');
+    } catch {
+      toast('Failed to reset stats.', 'error');
+    }
+  };
+
+  const blockRate = stats.total > 0 ? ((stats.blocked / stats.total) * 100).toFixed(1) : '0.0';
+
+  return (
+    <div className="page-layout">
+      {/* Header */}
+      <div className="page-header flex items-center justify-between">
+        <div>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">Real-time API rate limiting telemetry</p>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={handleReset}>
+          🔄 Reset Stats
+        </button>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="stats-row">
+        <StatCard label="Total Requests" value={stats.total} colorClass="accent" icon="📡" sub="All time" />
+        <StatCard label="Allowed" value={stats.allowed} colorClass="green" icon="✅" sub="Passed" />
+        <StatCard label="Blocked" value={stats.blocked} colorClass="red" icon="🚫" sub="Rate limited" />
+        <StatCard
+          label="Block Rate"
+          value={parseFloat(blockRate)}
+          colorClass={parseFloat(blockRate) > 20 ? 'red' : 'blue'}
+          icon="📊"
+          sub="Percentage"
+        />
+      </div>
+
+      {/* Chart + Endpoints Leaderboard */}
+      <div className="dashboard-grid">
+        {/* Line Chart */}
+        <div className="card">
+          <div className="panel-title">
+            Request Volume
+            <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>● Live</span>
+          </div>
+          {chartData.length === 0 ? (
+            <div className="empty-state" style={{ height: 240 }}>
+              <div className="empty-icon">📈</div>
+              <div>Waiting for API traffic...</div>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+                <XAxis dataKey="tick" stroke={textColor} tick={{ fontSize: 11 }} />
+                <YAxis stroke={textColor} tick={{ fontSize: 11 }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: '0.8rem', color: textColor }} />
+                <Line type="monotone" dataKey="Allowed" stroke="#22C55E" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="Blocked" stroke="#FF4D4D" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Top Endpoints */}
+        <Leaderboard title="🔥 Top Endpoints" items={stats.topEndpoints} />
+      </div>
+
+      {/* Bottom: API Keys + Top Users */}
+      <div className="bottom-grid">
+        {/* API Keys Panel */}
+        <div className="card">
+          <div className="panel-title">
+            API Keys
+            <CreateKeyForm onCreated={loadKeys} />
+          </div>
+          {keysLoading ? (
+            <div className="empty-state"><div className="spinner" /></div>
+          ) : keys.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">🔑</div>
+              <div>No API keys yet. Create your first one!</div>
+            </div>
+          ) : (
+            <div className="key-list">
+              {keys.map(k => (
+                <KeyItem key={k._id} k={k} onDelete={handleDelete} onCopy={handleCopy} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Top Users Leaderboard */}
+        <Leaderboard title="👤 Top API Key Users" items={stats.topUsers} />
+      </div>
+    </div>
+  );
+}

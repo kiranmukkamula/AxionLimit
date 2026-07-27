@@ -9,7 +9,7 @@ const { getRedisClient } = require('../config/db');
 const logAnalytics = async (identifier, endpoint, allowed) => {
   // Get active Redis client instance.
   const redis = getRedisClient();
-  
+
   // If Redis is offline, fail silently to prevent rate limiter responses from hanging.
   if (!redis || redis.status !== 'ready') return;
 
@@ -20,7 +20,7 @@ const logAnalytics = async (identifier, endpoint, allowed) => {
 
     // 1. Increment the overall total requests counter.
     pipeline.incr('telemetry:total_requests');
-    
+
     // Increment specific counters based on status (allowed vs blocked).
     if (allowed) {
       pipeline.incr('telemetry:allowed_requests');
@@ -32,7 +32,7 @@ const logAnalytics = async (identifier, endpoint, allowed) => {
     // If identifier or endpoint is missing, default to mock values.
     const activeIdentifier = identifier || 'anonymous';
     const activeEndpoint = endpoint || '/unknown';
-    
+
     // ZINCRBY syntax: ZINCRBY key increment member.
     // Increments the rank/score of user API Key and the request endpoint path by 1.
     pipeline.zincrby('telemetry:top_users', 1, activeIdentifier);
@@ -53,7 +53,7 @@ const logAnalytics = async (identifier, endpoint, allowed) => {
 const getStats = async () => {
   // Get Redis client.
   const redis = getRedisClient();
-  
+
   // Standard empty response format used when Redis is unavailable.
   const emptyStats = {
     total: 0,

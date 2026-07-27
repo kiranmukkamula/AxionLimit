@@ -1,0 +1,260 @@
+import React, { useState, useEffect } from 'react';
+import { getApiKeys, checkRateLimit } from '../api/client';
+import { useToast } from '../components/Toast';
+
+export default function SandboxPage() {
+  const toast = useToast();
+  const [keys, setKeys] = useState([]);
+  const [selectedKey, setSelectedKey] = useState('');
+  const [endpoint, setEndpoint] = useState('/api/v1/example');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [autoFire, setAutoFire] = useState(false);
+  const [autoInterval, setAutoInterval] = useState(null);
+
+  // Load API keys for the select
+  useEffect(() => {
+    getApiKeys()
+      .then(res => {
+        const k = res.data.keys || [];
+        setKeys(k);
+        if (k.length > 0) setSelectedKey(k[0].key);
+      })
+      .catch(() => toast('Failed to load keys.', 'error'));
+  }, []);
+
+  // Auto-fire interval
+  useEffect(() => {
+    if (autoFire) {
+      const id = setInterval(fireRequest, 600);
+      setAutoInterval(id);
+      return () => clearInterval(id);
+    } else {
+      if (autoInterval) clearInterval(autoInterval);
+    }
+  }, [autoFire, selectedKey, endpoint]);
+
+  const fireRequest = async () => {
+    if (!selectedKey) {
+      toast('Select an API key first.', 'error');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await checkRateLimit(selectedKey, endpoint);
+      const data = res.data;
+      setResult({ ...data, status: res.status });
+      setHistory(prev => [
+        { allowed: data.allowed, remaining: data.remaining, time: new Date().toLocaleTimeString(), endpoint },
+        ...prev.slice(0, 19)
+      ]);
+    } catch (err) {
+      const data = err.response?.data || {};
+      setResult({ allowed: false, remaining: 0, retryAfter: data.retryAfter || 1, status: 429 });
+      setHistory(prev => [
+        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint },
+        ...prev.slice(0, 19)
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectedKeyObj = keys.find(k => k.key === selectedKey);
+
+  return (
+    <div className="page-layout">
+      <div className="page-header">
+        <h1 className="page-title">Rate Limit Sandbox</h1>
+        <p className="page-subtitle">Test your API key limits in real-time. Watch the sliding window in action.</p>
+      </div>
+
+      <div className="sandbox-layout">
+        {/* Left: Controls */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card">
+            <div className="panel-title">⚙️ Configuration</div>
+
+            {/* Key Selector */}
+            <div style={{ marginBottom: 14 }}>
+              <label className="label">Select API Key</label>
+              {keys.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem', padding: '10px 0' }}>
+                  No API keys found. Create one in the Dashboard first.
+                </div>
+              ) : (
+                <select
+                  className="select"
+                  value={selectedKey}
+                  onChange={e => setSelectedKey(e.target.value)}
+                >
+                  {keys.map(k => (
+                    <option key={k._id} value={k.key}>{k.name} ({k.rateLimit.limit}r/{k.rateLimit.windowMs/1000}s)</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Selected Key Info */}
+            {selectedKeyObj && (
+              <div style={{
+                display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16,
+                padding: '10px 14px', background: 'var(--bg-input)',
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)'
+              }}>
+                <span className="badge badge-accent">Limit: {selectedKeyObj.rateLimit.limit} req</span>
+                <span className="badge badge-blue">Window: {selectedKeyObj.rateLimit.windowMs / 1000}s</span>
+              </div>
+            )}
+
+            {/* Endpoint Input */}
+            <div style={{ marginBottom: 16 }}>
+              <label className="label">Target Endpoint (label only)</label>
+              <input
+                className="input"
+                value={endpoint}
+                onChange={e => setEndpoint(e.target.value)}
+                placeholder="/api/v1/resource"
+              />
+            </div>
+
+            {/* Fire Button */}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={fireRequest}
+                disabled={loading || !selectedKey}
+              >
+                {loading ? <><div className="spinner" style={{ width: 16, height: 16, borderTopColor: '#000' }} /> Sending...</> : '🚀 Fire Request'}
+              </button>
+              <button
+                className={`btn ${autoFire ? 'btn-danger' : 'btn-ghost'}`}
+                onClick={() => setAutoFire(f => !f)}
+                disabled={!selectedKey}
+              >
+                {autoFire ? '⏹ Stop' : '⚡ Auto-Fire'}
+              </button>
+            </div>
+
+            {autoFire && (
+              <p style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--accent)' }}>
+                ⚡ Auto-firing every 600ms to trigger rate limits...
+              </p>
+            )}
+          </div>
+
+          {/* Request History */}
+          <div className="card">
+            <div className="panel-title">📜 Request History</div>
+            {history.length === 0 ? (
+              <div className="empty-state" style={{ padding: '24px 0' }}>
+                <div className="empty-icon">🕐</div>
+                <div>No requests fired yet.</div>
+              </div>
+            ) : (
+              <div className="fire-history">
+                {history.map((h, i) => (
+                  <div key={i} className="history-item">
+                    <div className={`history-dot ${h.allowed ? 'allowed' : 'blocked'}`} />
+                    <span style={{ flex: 1 }}>{h.endpoint}</span>
+                    <span style={{ color: h.allowed ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                      {h.allowed ? 'ALLOWED' : 'BLOCKED'}
+                    </span>
+                    <span style={{ color: 'var(--text-muted)', minWidth: 60, textAlign: 'right' }}>{h.time}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Result */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div className="card">
+            <div className="panel-title">📋 Live Result</div>
+            {result === null ? (
+              <div className="empty-state" style={{ height: 280 }}>
+                <div className="empty-icon">🎯</div>
+                <div>Fire a request to see the result here.</div>
+              </div>
+            ) : (
+              <div className={`sandbox-result ${result.allowed ? 'allowed' : 'blocked'}`}>
+                <span className="sandbox-status-icon">{result.allowed ? '✅' : '🚫'}</span>
+                <div className={`sandbox-status-text`} style={{ color: result.allowed ? 'var(--green)' : 'var(--red)' }}>
+                  {result.allowed ? 'Request Allowed' : 'Rate Limit Exceeded'}
+                </div>
+                <div className="sandbox-meta">
+                  <div className="sandbox-meta-row">
+                    <span className="sandbox-meta-key">HTTP Status</span>
+                    <span className="sandbox-meta-val">{result.allowed ? '200 OK' : '429 Too Many Requests'}</span>
+                  </div>
+                  <div className="sandbox-meta-row">
+                    <span className="sandbox-meta-key">Remaining Requests</span>
+                    <span className="sandbox-meta-val" style={{ color: result.remaining === 0 ? 'var(--red)' : 'var(--green)' }}>
+                      {result.remaining}
+                    </span>
+                  </div>
+                  <div className="sandbox-meta-row">
+                    <span className="sandbox-meta-key">Retry After</span>
+                    <span className="sandbox-meta-val">
+                      {result.retryAfter > 0 ? `${result.retryAfter}s` : '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Stats Summary */}
+          {history.length > 0 && (
+            <div className="card">
+              <div className="panel-title">📊 Session Stats</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div style={{ textAlign: 'center', padding: '14px', background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--green)' }}>
+                    {history.filter(h => h.allowed).length}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Allowed</div>
+                </div>
+                <div style={{ textAlign: 'center', padding: '14px', background: 'var(--bg-input)', borderRadius: 'var(--radius-sm)' }}>
+                  <div style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--red)' }}>
+                    {history.filter(h => !h.allowed).length}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>Blocked</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <div className="progress-bar" style={{ height: 8, borderRadius: 4 }}>
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width: `${(history.filter(h => h.allowed).length / history.length) * 100}%`,
+                      background: 'var(--green)'
+                    }}
+                  />
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <span>Allow rate: {((history.filter(h => h.allowed).length / history.length) * 100).toFixed(0)}%</span>
+                  <span>Total: {history.length}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Info Card */}
+          <div className="card" style={{ border: '1px solid var(--accent-dim)' }}>
+            <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>How it works</div>
+              The <strong>Sliding Window Log</strong> algorithm uses Redis Sorted Sets (ZSET) to track
+              each request's exact timestamp. When a request arrives, it prunes all entries older
+              than the window, counts the remaining entries, and either allows or blocks the request
+              atomically using a Lua script — preventing race conditions even under heavy load.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

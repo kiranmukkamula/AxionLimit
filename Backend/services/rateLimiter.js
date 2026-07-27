@@ -1,3 +1,6 @@
+// Import the built-in Node.js crypto library for secure random string generation.
+const crypto = require('crypto');
+
 // Import the Redis database client getter function from our consolidated database config file.
 const { getRedisClient } = require('../config/db');
 
@@ -109,12 +112,11 @@ const isAllowed = async (identifier, limit, windowMs) => {
 
     // Get current Unix epoch timestamp in milliseconds.
     const now = Date.now();
-    
-    // Generate a unique suffix using base-36 random string (e.g. 'k3d8a').
-    // This prevents multiple requests fired at the exact same millisecond from colliding/overwriting.
-    const uniqueSuffix = Math.random().toString(36).substring(2, 8);
-    const member = `${now}:${uniqueSuffix}`;
-    
+
+    // Generate a unique member using a timestamp and secure random 8-byte hexadecimal suffix.
+    // This guarantees that multiple requests fired in the same millisecond do not collide or overwrite in the Redis sorted set (ZSET).
+    const member = `${now}:${crypto.randomBytes(8).toString('hex')}`;
+
     // Define the Redis key path for this rate limit log.
     const key = `rate_limit:${identifier}`;
 

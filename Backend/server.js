@@ -29,8 +29,8 @@ const passport = require('./config/passport');
  * ============================================================================
  * Import the route handlers that group our logical controller endpoints.
  */
-
 // Auth routes: Manages OAuth authentication paths, token generation, and profile retrieval.
+
 const authRoutes = require('./routes/auth');
 
 // API Key management routes: Handles creation, retrieval, and revocation of API keys.
@@ -59,9 +59,11 @@ connectDB();
  * STEP 4: GLOBAL MIDDLEWARES SETUP
  * ============================================================================
  */
-
-// Enable CORS for all incoming requests, allowing external applications to query our rate limiting endpoints.
-app.use(cors());
+// Configure CORS to allow the React dev server (port 3000) and the legacy static frontend (port 5000).
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:5000'],
+  credentials: true,
+}));
 
 // Parse incoming requests with JSON payloads (essential for parsing raw JSON bodies in request objects).
 app.use(express.json());

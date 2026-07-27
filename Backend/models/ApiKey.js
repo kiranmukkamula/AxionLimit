@@ -48,8 +48,7 @@ const ApiKeySchema = new mongoose.Schema({
   // MongoDB automatically deletes this key document after 60 days.
   createdAt: {
     type: Date,
-    default: Date.now,
-    expires: '60d'
+    default: Date.now
   }
 });
 

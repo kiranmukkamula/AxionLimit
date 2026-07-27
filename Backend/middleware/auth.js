@@ -18,10 +18,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'supersecret_axionlimit_key_12345!'
  * Validates the caller's JSON Web Token passed inside request headers.
  * Protects control plane routes (like getting stats, deleting keys, etc.).
  */
+
 const verifyJWT = (req, res, next) => {
   // Retrieve the Authorization header from the incoming request.
   const authHeader = req.headers['authorization'];
-  
+
   // Extract token: Expects 'Bearer <token>'. Split by whitespace and grab index 1.
   const token = authHeader && authHeader.split(' ')[1];
 
@@ -33,16 +34,16 @@ const verifyJWT = (req, res, next) => {
   try {
     // Verify token validity against our secret key. This throws an error if token is expired/modified.
     const decoded = jwt.verify(token, JWT_SECRET);
-    
+
     // Attach the decrypted user payload (e.g. userId, email) directly to the request object.
     req.user = decoded;
-    
+
     // Proceed to the next middleware or final route controller handler.
     next();
   } catch (err) {
     // Log verification failures.
     console.error('JWT Verification Error:', err.message);
-    
+
     // Return a 401 response letting the client know their session has expired or is invalid.
     return res.status(401).json({ error: 'Access token is invalid or expired.' });
   }
@@ -53,6 +54,7 @@ const verifyJWT = (req, res, next) => {
  * Optimizes API checking by looking up API Key metadata configuration inside Redis before querying MongoDB.
  * Reads API key from: Header, query parameters, or body parameters.
  */
+
 const verifyApiKey = async (req, res, next) => {
   // Check the key presence in standard x-api-key header, query parameter, or JSON request body.
   const apiKey = req.headers['x-api-key'] || req.query.apiKey || req.body.apiKey;
@@ -64,26 +66,26 @@ const verifyApiKey = async (req, res, next) => {
 
   // Get the active Redis connection instance.
   const redis = getRedisClient();
-  
+
   // Build a distinct string key namespace pattern for caching this key's metadata.
   const cacheKey = `apikey:${apiKey}`;
 
-  // ==========================================
+  // =========================================
   // STEP 1: REDIS CACHE LOOKUP
   // ==========================================
   if (redis && redis.status === 'ready') {
     try {
       // Query Redis cache for the key's metadata.
       const cachedData = await redis.get(cacheKey);
-      
+
       // If cache hit is successful:
       if (cachedData) {
         // Parse the cached JSON configuration string.
         const metadata = JSON.parse(cachedData);
-        
+
         // Attach metadata details (userId, request limits) to the request object.
         req.apiKeyMetadata = metadata;
-        
+
         // Proceed instantly without querying MongoDB, eliminating database overhead.
         return next();
       }
@@ -99,7 +101,7 @@ const verifyApiKey = async (req, res, next) => {
   try {
     // Query MongoDB for the active API key configuration.
     const keyDoc = await ApiKey.findOne({ key: apiKey, isActive: true });
-    
+
     // If key document doesn't exist, return a 401 Unauthorized response.
     if (!keyDoc) {
       return res.status(401).json({ error: 'Invalid or inactive API key.' });
@@ -129,13 +131,13 @@ const verifyApiKey = async (req, res, next) => {
 
     // Attach metadata configurations to the request.
     req.apiKeyMetadata = metadata;
-    
+
     // Proceed to rate limiter controller.
     next();
   } catch (err) {
     // Log unexpected MongoDB connection/lookup failures.
     console.error('❌ Database error in API key auth:', err);
-    
+
     // Return a 500 server error response.
     return res.status(500).json({ error: 'Internal server error validating API key.' });
   }
