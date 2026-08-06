@@ -13,7 +13,6 @@ export default function SandboxPage() {
   const [autoFire, setAutoFire] = useState(false);
   const [autoInterval, setAutoInterval] = useState(null);
 
-  // Load API keys for the select
   useEffect(() => {
     getApiKeys()
       .then(res => {
@@ -24,7 +23,6 @@ export default function SandboxPage() {
       .catch(() => toast('Failed to load keys.', 'error'));
   }, []);
 
-  // Auto-fire interval
   useEffect(() => {
     if (autoFire) {
       const id = setInterval(fireRequest, 600);
@@ -71,12 +69,10 @@ export default function SandboxPage() {
       </div>
 
       <div className="sandbox-layout">
-        {/* Left: Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="panel-title">⚙️ Configuration</div>
 
-            {/* Key Selector */}
             <div style={{ marginBottom: 14 }}>
               <label className="label">Select API Key</label>
               {keys.length === 0 ? (
@@ -96,7 +92,6 @@ export default function SandboxPage() {
               )}
             </div>
 
-            {/* Selected Key Info */}
             {selectedKeyObj && (
               <div style={{
                 display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16,
@@ -108,7 +103,6 @@ export default function SandboxPage() {
               </div>
             )}
 
-            {/* Endpoint Input */}
             <div style={{ marginBottom: 16 }}>
               <label className="label">Target Endpoint (label only)</label>
               <input
@@ -119,7 +113,6 @@ export default function SandboxPage() {
               />
             </div>
 
-            {/* Fire Button */}
             <div style={{ display: 'flex', gap: 10 }}>
               <button
                 className="btn btn-primary"
@@ -145,7 +138,6 @@ export default function SandboxPage() {
             )}
           </div>
 
-          {/* Request History */}
           <div className="card">
             <div className="panel-title">📜 Request History</div>
             {history.length === 0 ? (
@@ -170,7 +162,6 @@ export default function SandboxPage() {
           </div>
         </div>
 
-        {/* Right: Result */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card">
             <div className="panel-title">📋 Live Result</div>
@@ -207,7 +198,6 @@ export default function SandboxPage() {
             )}
           </div>
 
-          {/* Stats Summary */}
           {history.length > 0 && (
             <div className="card">
               <div className="panel-title">📊 Session Stats</div>
@@ -243,7 +233,6 @@ export default function SandboxPage() {
             </div>
           )}
 
-          {/* Info Card */}
           <div className="card" style={{ border: '1px solid var(--accent-dim)' }}>
             <div style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
               <div style={{ fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>How it works</div>
@@ -258,3 +247,4 @@ export default function SandboxPage() {
     </div>
   );
 }
+

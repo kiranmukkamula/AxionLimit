@@ -9,7 +9,6 @@ import {
   getApiKeys, createApiKey, deleteApiKey as deleteKey
 } from '../api/client';
 
-// ─── Stat Card ─────────────────────────────────────────────────────────────
 function StatCard({ label, value, colorClass, icon, sub }) {
   return (
     <div className="stat-card">
@@ -22,7 +21,6 @@ function StatCard({ label, value, colorClass, icon, sub }) {
   );
 }
 
-// ─── Leaderboard ────────────────────────────────────────────────────────────
 function Leaderboard({ title, items }) {
   const max = items[0]?.value || 1;
   return (
@@ -51,7 +49,6 @@ function Leaderboard({ title, items }) {
   );
 }
 
-// ─── Key Item ───────────────────────────────────────────────────────────────
 function KeyItem({ k, onDelete, onCopy }) {
   const [revealed, setRevealed] = useState(false);
 
@@ -79,7 +76,6 @@ function KeyItem({ k, onDelete, onCopy }) {
   );
 }
 
-// ─── Create Key Form ─────────────────────────────────────────────────────────
 function CreateKeyForm({ onCreated }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -136,7 +132,6 @@ function CreateKeyForm({ onCreated }) {
   );
 }
 
-// ─── Custom Tooltip ─────────────────────────────────────────────────────────
 function CustomTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
@@ -152,7 +147,6 @@ function CustomTooltip({ active, payload, label }) {
   );
 }
 
-// ─── Dashboard ───────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { theme } = useTheme();
   const toast = useToast();
@@ -165,11 +159,9 @@ export default function DashboardPage() {
   const [keys, setKeys] = useState([]);
   const [keysLoading, setKeysLoading] = useState(true);
 
-  const accentColor = theme === 'dark' ? '#BCFE44' : '#2563EB';
   const gridColor = theme === 'dark' ? '#222' : '#E5E7EB';
   const textColor = theme === 'dark' ? '#888' : '#9CA3AF';
 
-  // Load API Keys
   const loadKeys = useCallback(async () => {
     try {
       const res = await getApiKeys();
@@ -183,7 +175,6 @@ export default function DashboardPage() {
 
   useEffect(() => { loadKeys(); }, [loadKeys]);
 
-  // Poll stats every 4 seconds
   useEffect(() => {
     const poll = async () => {
       try {
@@ -198,11 +189,11 @@ export default function DashboardPage() {
             Blocked: s.blocked,
           };
           const next = [...prev, newPoint];
-          return next.slice(-20); // Keep last 20 ticks
+          return next.slice(-20);
         });
         setTickIndex(i => i + 1);
         setPrevStats(s);
-      } catch { /* silent */ }
+      } catch {}
     };
 
     poll();
@@ -241,7 +232,6 @@ export default function DashboardPage() {
 
   return (
     <div className="page-layout">
-      {/* Header */}
       <div className="page-header flex items-center justify-between">
         <div>
           <h1 className="page-title">Dashboard</h1>
@@ -252,7 +242,6 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Stat Cards */}
       <div className="stats-row">
         <StatCard label="Total Requests" value={stats.total} colorClass="accent" icon="📡" sub="All time" />
         <StatCard label="Allowed" value={stats.allowed} colorClass="green" icon="✅" sub="Passed" />
@@ -266,9 +255,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Chart + Endpoints Leaderboard */}
       <div className="dashboard-grid">
-        {/* Line Chart */}
         <div className="card">
           <div className="panel-title">
             Request Volume
@@ -294,13 +281,10 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Top Endpoints */}
         <Leaderboard title="🔥 Top Endpoints" items={stats.topEndpoints} />
       </div>
 
-      {/* Bottom: API Keys + Top Users */}
       <div className="bottom-grid">
-        {/* API Keys Panel */}
         <div className="card">
           <div className="panel-title">
             API Keys
@@ -322,9 +306,9 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Top Users Leaderboard */}
         <Leaderboard title="👤 Top API Key Users" items={stats.topUsers} />
       </div>
     </div>
   );
 }
+

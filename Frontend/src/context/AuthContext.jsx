@@ -9,7 +9,6 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Check for token in URL hash (from Google OAuth callback)
     const hash = window.location.hash;
     if (hash.includes('token=')) {
       const urlToken = hash.split('token=')[1];
@@ -56,3 +55,4 @@ export function AuthProvider({ children }) {
 }
 
 export const useAuth = () => useContext(AuthContext);
+

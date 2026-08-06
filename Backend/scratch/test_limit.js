@@ -6,7 +6,6 @@ const telemetry = require('../services/telemetry');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Simple in-memory Redis mock to run tests successfully even if Redis isn't running locally.
 class MockRedis {
   constructor() {
     this.status = 'ready';
@@ -14,9 +13,7 @@ class MockRedis {
     this.zsets = {};
   }
 
-  defineCommand(name, definition) {
-    // checkRateLimit is already natively implemented on MockRedis, so stub is enough
-  }
+  defineCommand(name, definition) {}
 
   async checkRateLimit(key, limit, windowMs, now, member) {
     if (!this.zsets[key]) {
@@ -24,7 +21,6 @@ class MockRedis {
     }
     const zset = this.zsets[key];
     
-    // Prune
     const clearBefore = now - windowMs;
     const pruned = zset.filter(x => x.score > clearBefore);
     this.zsets[key] = pruned;
@@ -51,7 +47,6 @@ class MockRedis {
 
   async zrevrange(key, start, end, withScores) {
     const zset = this.zsets[key] || [];
-    // Sort descending by score
     const sorted = [...zset].sort((a, b) => b.score - a.score);
     const sliced = sorted.slice(start, end + 1);
     
@@ -110,7 +105,6 @@ class MockRedis {
 async function runTests() {
   console.log('🏁 Starting AxionLimit Integration Tests...\n');
 
-  // Connect to MongoDB
   try {
     await connectDB();
   } catch (err) {
@@ -128,18 +122,15 @@ async function runTests() {
     redis = new MockRedis();
     isMocked = true;
     
-    // Inject mock client into db configuration dynamically for the active services
     const dbConfig = require('../config/db');
     dbConfig.setRedisClient(redis);
   } else {
     console.log('✅ Real Redis Client detected.');
   }
 
-  // Clear previous test telemetry stats to have a clean slate
   await telemetry.resetStats();
 
   try {
-    // 2. Seed Mock User
     console.log('👤 Seeding mock user in MongoDB...');
     const testGoogleId = 'test_integration_user_123';
     let user = await User.findOne({ googleId: testGoogleId });
@@ -155,7 +146,6 @@ async function runTests() {
     await user.save();
     console.log(`✅ Seeded User ID: ${user._id}`);
 
-    // 3. Seed Mock API Key with tight rate limits for testing (5 requests per 10 seconds)
     console.log('🔑 Seeding mock API Key in MongoDB...');
     const rawKey = 'ax_test_integration_key_999';
     await ApiKey.deleteOne({ key: rawKey });
@@ -164,14 +154,13 @@ async function runTests() {
       userId: user._id,
       name: 'Integration Test Key',
       rateLimit: {
-        limit: 5, // 5 requests
-        windowMs: 10000 // 10 seconds
+        limit: 5,
+        windowMs: 10000
       }
     });
     await apiKeyDoc.save();
     console.log(`✅ Seeded API Key. Limit: 5 requests / 10s window.`);
 
-    // 4. Test Sliding Window Rate Limiting (Allowed Zone)
     console.log('\n⚡ Testing Sliding Window Allowed Zone (Sending 5 requests)...');
     const endpoint = '/api/v1/resource';
 
@@ -185,7 +174,6 @@ async function runTests() {
       }
     }
 
-    // 5. Test Rate Limiting (Blocked Zone)
     console.log('\n🚫 Testing Blocked Zone (Sending 6th request)...');
     const resBlocked = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
     await telemetry.logAnalytics(apiKeyDoc.name, endpoint, resBlocked.allowed);
@@ -198,7 +186,6 @@ async function runTests() {
       throw new Error('RetryAfter should be greater than 0 seconds.');
     }
 
-    // 6. Verify Telemetry Tracking
     console.log('\n📊 Verifying Telemetry counters and ZSETs...');
     const stats = await telemetry.getStats();
     console.log('  Current stats:', stats);
@@ -213,7 +200,6 @@ async function runTests() {
       throw new Error(`Expected blocked telemetry requests: 1, got: ${stats.blocked}`);
     }
     
-    // In mock or real, verify ZSET is logged
     if (stats.topEndpoints[0]?.name !== endpoint) {
       throw new Error(`Expected top endpoint: ${endpoint}, got: ${stats.topEndpoints[0]?.name}`);
     }
@@ -222,7 +208,6 @@ async function runTests() {
     }
     console.log('✅ Telemetry pipeline verified successfully.');
 
-    // 7. Verify sliding window expiration over time
     if (!isMocked) {
       console.log('\n⏳ Waiting 11 seconds for sliding window logs to fall out...');
       await sleep(11000);
@@ -237,7 +222,6 @@ async function runTests() {
       console.log('✅ Rate limiter recovery verified successfully.');
     } else {
       console.log('\n⏳ Simulating 11-second sleep for mock Redis...');
-      // Manually evaluate recovery by calling rate limiter with future timestamp
       const futureNow = Date.now() + 11000;
       const key = `rate_limit:${rawKey}`;
       const [allowedStatus, remaining] = await redis.checkRateLimit(key, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs, futureNow, `mock_future_req`);
@@ -248,10 +232,8 @@ async function runTests() {
       console.log('✅ Mock Rate limiter recovery verified successfully.');
     }
 
-    // 8. Test Fail-Open Resiliency
     console.log('\n🛠️ Testing Fail-Open Strategy when Redis is offline...');
     
-    // Simulate Redis offline status
     redis.status = 'end'; 
     const resFailOpen = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
     console.log(`  Fail-open Request: Allowed? ${resFailOpen.allowed} | Remaining: ${resFailOpen.remaining}`);
@@ -261,7 +243,6 @@ async function runTests() {
     }
     console.log('✅ Fail-open strategy verified successfully.');
 
-    // Clean up
     console.log('\n🧹 Cleaning up test seeding data in MongoDB...');
     await User.deleteOne({ _id: user._id });
     await ApiKey.deleteOne({ _id: apiKeyDoc._id });
@@ -273,7 +254,6 @@ async function runTests() {
   } catch (err) {
     console.error('\n❌ TEST FAILED:', err.message);
   } finally {
-    // Terminate DB Connections
     await mongoose.disconnect();
     redis.disconnect();
     console.log('🔌 Disconnected MongoDB and Redis. Exiting.');
@@ -282,3 +262,4 @@ async function runTests() {
 }
 
 runTests();
+

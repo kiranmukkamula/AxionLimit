@@ -10,7 +10,6 @@ export default function Navbar() {
   const dropRef = useRef(null);
   const navigate = useNavigate();
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handler = (e) => {
       if (dropRef.current && !dropRef.current.contains(e.target)) setDropOpen(false);
@@ -30,13 +29,11 @@ export default function Navbar() {
 
   return (
     <nav className="navbar">
-      {/* Logo */}
       <div className="navbar-logo">
         <div className="navbar-logo-icon">⚡</div>
         AxionLimit
       </div>
 
-      {/* Nav Links */}
       <div className="navbar-nav">
         <NavLink to="/dashboard" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
           Dashboard
@@ -46,16 +43,13 @@ export default function Navbar() {
         </NavLink>
       </div>
 
-      {/* Right side */}
       <div className="navbar-right">
-        {/* Theme Toggle */}
         <button className="theme-toggle" onClick={toggle} aria-label="Toggle theme">
           <div className="theme-toggle-knob">
             {theme === 'dark' ? '🌙' : '☀️'}
           </div>
         </button>
 
-        {/* User pill */}
         {user && (
           <div className="user-pill" onClick={() => setDropOpen(o => !o)} ref={dropRef}>
             {user.avatar ? (
@@ -83,3 +77,4 @@ export default function Navbar() {
     </nav>
   );
 }
+

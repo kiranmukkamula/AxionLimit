@@ -90,6 +90,7 @@ The SDK automatically sets these headers on every response:
 | `apiKey` | `string` | ✅ Yes | — | API key from AxionLimit dashboard |
 | `serverUrl` | `string` | No | `http://localhost:5000` | Base URL of your AxionLimit server |
 
+
 ---
 
 ## Dashboard
