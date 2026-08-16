@@ -19,9 +19,11 @@ app.use(cors({
   origin: ['http://localhost:3000', 'http://localhost:5000'],
   credentials: true,
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
+
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/auth', authRoutes);
@@ -45,4 +47,3 @@ const server = app.listen(PORT, () => {
 });
 
 module.exports = server;
-

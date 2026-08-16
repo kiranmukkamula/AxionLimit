@@ -80,5 +80,4 @@ module.exports = {
   verifyJWT,
   verifyApiKey
 };
-yApiKey
-};
+

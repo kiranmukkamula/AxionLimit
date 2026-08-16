@@ -11,6 +11,7 @@ if (!clientID || clientID === 'dummy-client-id') {
   console.warn('⚠️ Google OAuth Client ID is not configured. Google login will not function. Use the mock login option on the dashboard for testing.');
 }
 
+
 passport.use(
   new GoogleStrategy(
     {
