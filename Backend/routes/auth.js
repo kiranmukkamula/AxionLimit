@@ -3,7 +3,7 @@ const passport = require('passport');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { verifyJWT } = require('../middleware/auth');
-require('../config/passport'); 
+require('../config/passport');
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret_axionlimit_key_12345!';
@@ -19,9 +19,8 @@ const generateToken = (user) => {
 
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-router.get(
-  '/google/callback',
-  passport.authenticate('google', { failureRedirect: '/?error=oauth_failed', session: false }),
+router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/?error=oauth_failed', session: false }),
+
   (req, res) => {
     try {
       const token = generateToken(req.user);
@@ -37,7 +36,7 @@ router.post('/dev-login', async (req, res) => {
   try {
     const devGoogleId = 'mock_dev_google_id_99999';
     let user = await User.findOne({ googleId: devGoogleId });
-    
+
     if (!user) {
       user = new User({
         googleId: devGoogleId,
@@ -49,7 +48,7 @@ router.post('/dev-login', async (req, res) => {
     }
 
     const token = generateToken(user);
-    
+
     return res.status(200).json({
       success: true,
       token,
@@ -72,7 +71,7 @@ router.get('/me', verifyJWT, async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
-    
+
     return res.json({
       id: user._id,
       email: user.email,

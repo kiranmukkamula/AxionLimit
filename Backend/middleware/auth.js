@@ -76,8 +76,4 @@ const verifyApiKey = async (req, res, next) => {
   }
 };
 
-module.exports = {
-  verifyJWT,
-  verifyApiKey
-};
-
+module.exports = { verifyJWT, verifyApiKey };

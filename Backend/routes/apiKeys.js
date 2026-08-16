@@ -32,7 +32,10 @@ router.post('/', async (req, res) => {
     try {
       currentQuotaCount = await redis.incr(quotaKey);
       if (currentQuotaCount === 1) {
-        await redis.expire(quotaKey, 86400);
+        const now = new Date();
+        const endOfDay = new Date(now).setUTCHours(23, 59, 59, 999);
+        const ttlSeconds = Math.max(1, Math.ceil((endOfDay - now) / 1000));
+        await redis.expire(quotaKey, ttlSeconds);
       }
       if (currentQuotaCount > 3) {
         quotaExceeded = true;
@@ -47,7 +50,8 @@ router.post('/', async (req, res) => {
       });
       if (dbCount >= 3) quotaExceeded = true;
     }
-  } else {
+  }
+  else {
     console.warn('⚠️ Redis offline. Checking daily quota in MongoDB.');
     const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
     const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
@@ -62,7 +66,7 @@ router.post('/', async (req, res) => {
     if (redis && redis.status === 'ready' && currentQuotaCount > 3) {
       try {
         await redis.decr(quotaKey);
-      } catch (e) {}
+      } catch (e) { }
     }
     return res.status(429).json({
       error: 'Daily API key generation quota (max 3 keys/day) has been exceeded.'
@@ -93,7 +97,7 @@ router.post('/', async (req, res) => {
     if (redis && redis.status === 'ready') {
       try {
         await redis.decr(quotaKey);
-      } catch (e) {}
+      } catch (e) { }
     }
     return res.status(500).json({ error: 'Failed to generate API Key.' });
   }
@@ -105,7 +109,7 @@ router.delete('/:id', async (req, res) => {
     const userId = req.user.userId;
 
     const keyDoc = await ApiKey.findOneAndDelete({ _id: keyId, userId });
-    
+
     if (!keyDoc) {
       return res.status(404).json({ error: 'API key not found or unauthorized.' });
     }
