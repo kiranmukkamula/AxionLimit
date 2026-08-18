@@ -5,6 +5,8 @@ require('dotenv').config();
 const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/axionlimit';
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
+// The project uses ONE shared Redis connection. Different features use different
+// Redis key names (for example, `apikey:*` and `rate_limit:*`) on this same server.
 let redisClient = null;
 
 const connectDB = async () => {
@@ -61,4 +63,3 @@ module.exports = {
   setRedisClient: (client) => { redisClient = client; },
   mongoose
 };
-

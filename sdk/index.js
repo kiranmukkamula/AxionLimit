@@ -5,32 +5,32 @@ function axionLimit({ apiKey, serverUrl = 'http://localhost:5000' } = {}) {
     throw new Error('[axion-limit-sdk] apiKey is required. Generate one at your AxionLimit dashboard.');
   }
 
-  return async function axionLimitMiddleware(req, res, next) {
+  return async function axionLimitMiddleware(clientRequest, clientResponse, next) {
     try {
       const response = await axios.get(`${serverUrl}/api/check-limit`, {
         headers: {
           'x-api-key': apiKey
         },
         params: {
-          endpoint: req.path
+          endpoint: clientRequest.path
         },
         timeout: 3000
       });
 
       if (response.data.remaining !== undefined) {
-        res.setHeader('X-RateLimit-Remaining', response.data.remaining);
+        clientResponse.setHeader('X-RateLimit-Remaining', response.data.remaining);
       }
       if (response.data.retryAfter !== undefined) {
-        res.setHeader('X-RateLimit-RetryAfter', response.data.retryAfter);
+        clientResponse.setHeader('X-RateLimit-RetryAfter', response.data.retryAfter);
       }
 
       return next();
-    } catch (err) {
-      if (err.response?.status === 429) {
-        return res.status(429).json({
+    } catch (rateLimitServiceError) {
+      if (rateLimitServiceError.response?.status === 429) {
+        return clientResponse.status(429).json({
           error: 'Too Many Requests',
           message: 'Rate limit exceeded. Please slow down.',
-          retryAfter: err.response.data?.retryAfter ?? 1
+          retryAfter: rateLimitServiceError.response.data?.retryAfter ?? 1
         });
       }
 
@@ -41,4 +41,3 @@ function axionLimit({ apiKey, serverUrl = 'http://localhost:5000' } = {}) {
 }
 
 module.exports = axionLimit;
-

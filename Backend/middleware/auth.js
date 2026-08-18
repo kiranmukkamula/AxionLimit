@@ -24,51 +24,55 @@ const verifyJWT = (req, res, next) => {
 };
 
 const verifyApiKey = async (req, res, next) => {
-  const apiKey = req.headers['x-api-key'] || req.query.apiKey || req.body.apiKey;
+  const suppliedApiKey = req.headers['x-api-key'] || req.query.apiKey || req.body.apiKey;
 
-  if (!apiKey) {
+  if (!suppliedApiKey) {
     return res.status(401).json({ error: 'API key is missing.' });
   }
 
-  const redis = getRedisClient();
-  const cacheKey = `apikey:${apiKey}`;
+  const redisClient = getRedisClient();
+  // Redis record #1: API-key metadata cache (a normal Redis string).
+  // Example key: `apikey:ax_abc123`
+  // Value: JSON containing the key's owner, name, request limit, and window.
+  // This is NOT the request timestamp data used to enforce the rate limit.
+  const apiKeyMetadataCacheKey = `apikey:${suppliedApiKey}`;
 
-  if (redis && redis.status === 'ready') {
+  if (redisClient && redisClient.status === 'ready') {
     try {
-      const cachedData = await redis.get(cacheKey);
-      if (cachedData) {
-        req.apiKeyMetadata = JSON.parse(cachedData);
+      const cachedApiKeyMetadata = await redisClient.get(apiKeyMetadataCacheKey);
+      if (cachedApiKeyMetadata) {
+        req.apiKeyMetadata = JSON.parse(cachedApiKeyMetadata);
         return next();
       }
-    } catch (err) {
-      console.error('⚠️ Redis cache read error in API key auth, falling back to DB:', err);
+  } catch (cacheReadError) {
+    console.error('⚠️ Redis cache read error in API key auth, falling back to DB:', cacheReadError);
     }
   }
 
   try {
-    const keyDoc = await ApiKey.findOne({ key: apiKey, isActive: true });
+    const apiKeyDocument = await ApiKey.findOne({ key: suppliedApiKey, isActive: true });
 
-    if (!keyDoc) {
+    if (!apiKeyDocument) {
       return res.status(401).json({ error: 'Invalid or inactive API key.' });
     }
 
-    const metadata = {
-      key: keyDoc.key,
-      userId: keyDoc.userId.toString(),
-      name: keyDoc.name,
-      limit: keyDoc.rateLimit.limit,
-      windowMs: keyDoc.rateLimit.windowMs
+    const apiKeyMetadata = {
+      key: apiKeyDocument.key,
+      userId: apiKeyDocument.userId.toString(),
+      name: apiKeyDocument.name,
+      limit: apiKeyDocument.rateLimit.limit,
+      windowMs: apiKeyDocument.rateLimit.windowMs
     };
 
-    if (redis && redis.status === 'ready') {
+    if (redisClient && redisClient.status === 'ready') {
       try {
-        await redis.set(cacheKey, JSON.stringify(metadata), 'EX', 3600);
+        await redisClient.set(apiKeyMetadataCacheKey, JSON.stringify(apiKeyMetadata), 'EX', 3600);
       } catch (cacheErr) {
         console.error('⚠️ Failed to write API key cache to Redis:', cacheErr);
       }
     }
 
-    req.apiKeyMetadata = metadata;
+    req.apiKeyMetadata = apiKeyMetadata;
     next();
   } catch (err) {
     console.error('❌ Database error in API key auth:', err);

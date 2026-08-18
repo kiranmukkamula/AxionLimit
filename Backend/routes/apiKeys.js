@@ -19,23 +19,26 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const userId = req.user.userId;
-  const { name, limit, windowMs } = req.body;
-  const today = new Date().toISOString().slice(0, 10);
-  const quotaKey = `apikey_limit:${userId}:${today}`;
-  const redis = getRedisClient();
+  const authenticatedUserId = req.user.userId;
+  const { name: apiKeyName, limit: requestedLimit, windowMs: requestedWindowMs } = req.body;
+  const currentUtcDate = new Date().toISOString().slice(0, 10);
+  // Redis record #2: per-user, per-day API-key creation counter.
+  // Example key: `apikey_limit:developer-id:2026-08-17`
+  // It limits a developer to three newly generated API keys per day.
+  const dailyApiKeyCreationQuotaKey = `apikey_limit:${authenticatedUserId}:${currentUtcDate}`;
+  const redisClient = getRedisClient();
 
   let quotaExceeded = false;
   let currentQuotaCount = 0;
 
-  if (redis && redis.status === 'ready') {
+  if (redisClient && redisClient.status === 'ready') {
     try {
-      currentQuotaCount = await redis.incr(quotaKey);
+      currentQuotaCount = await redisClient.incr(dailyApiKeyCreationQuotaKey);
       if (currentQuotaCount === 1) {
         const now = new Date();
         const endOfDay = new Date(now).setUTCHours(23, 59, 59, 999);
         const ttlSeconds = Math.max(1, Math.ceil((endOfDay - now) / 1000));
-        await redis.expire(quotaKey, ttlSeconds);
+        await redisClient.expire(dailyApiKeyCreationQuotaKey, ttlSeconds);
       }
       if (currentQuotaCount > 3) {
         quotaExceeded = true;
@@ -45,7 +48,7 @@ router.post('/', async (req, res) => {
       const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
       const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
       const dbCount = await ApiKey.countDocuments({
-        userId,
+        userId: authenticatedUserId,
         createdAt: { $gte: startOfDay, $lte: endOfDay }
       });
       if (dbCount >= 3) quotaExceeded = true;
@@ -56,16 +59,16 @@ router.post('/', async (req, res) => {
     const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
     const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
     const dbCount = await ApiKey.countDocuments({
-      userId,
+      userId: authenticatedUserId,
       createdAt: { $gte: startOfDay, $lte: endOfDay }
     });
     if (dbCount >= 3) quotaExceeded = true;
   }
 
   if (quotaExceeded) {
-    if (redis && redis.status === 'ready' && currentQuotaCount > 3) {
+    if (redisClient && redisClient.status === 'ready' && currentQuotaCount > 3) {
       try {
-        await redis.decr(quotaKey);
+        await redisClient.decr(dailyApiKeyCreationQuotaKey);
       } catch (e) { }
     }
     return res.status(429).json({
@@ -74,29 +77,29 @@ router.post('/', async (req, res) => {
   }
 
   try {
-    const rawKey = 'ax_' + crypto.randomBytes(24).toString('hex');
-    const newKey = new ApiKey({
-      key: rawKey,
-      userId: userId,
-      name: name || `API Key ${new Date().toLocaleDateString()}`,
+    const generatedApiKeyValue = 'ax_' + crypto.randomBytes(24).toString('hex');
+    const apiKeyDocumentToCreate = new ApiKey({
+      key: generatedApiKeyValue,
+      userId: authenticatedUserId,
+      name: apiKeyName || `API Key ${new Date().toLocaleDateString()}`,
       rateLimit: {
-        limit: limit ? parseInt(limit, 10) : 100,
-        windowMs: windowMs ? parseInt(windowMs, 10) : 60000
+        limit: requestedLimit ? parseInt(requestedLimit, 10) : 100,
+        windowMs: requestedWindowMs ? parseInt(requestedWindowMs, 10) : 60000
       }
     });
 
-    await newKey.save();
+    await apiKeyDocumentToCreate.save();
 
     return res.status(201).json({
       success: true,
       message: 'API Key generated successfully.',
-      key: newKey
+      key: apiKeyDocumentToCreate
     });
   } catch (err) {
     console.error('❌ Error creating API key:', err);
-    if (redis && redis.status === 'ready') {
+    if (redisClient && redisClient.status === 'ready') {
       try {
-        await redis.decr(quotaKey);
+        await redisClient.decr(dailyApiKeyCreationQuotaKey);
       } catch (e) { }
     }
     return res.status(500).json({ error: 'Failed to generate API Key.' });
@@ -116,6 +119,7 @@ router.delete('/:id', async (req, res) => {
 
     const redis = getRedisClient();
     if (redis && redis.status === 'ready') {
+      // Redis record #1 again: remove this key's metadata cache after revocation.
       const cacheKey = `apikey:${keyDoc.key}`;
       try {
         await redis.del(cacheKey);
@@ -135,4 +139,3 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
-

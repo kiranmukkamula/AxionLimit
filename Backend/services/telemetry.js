@@ -1,26 +1,47 @@
 const { getRedisClient } = require('../config/db');
 
-const logAnalytics = async (identifier, endpoint, allowed) => {
+// Redis records #4–#8: shared dashboard telemetry.
+// - telemetry:total_requests     (counter)
+// - telemetry:allowed_requests   (counter)
+// - telemetry:blocked_requests   (counter)
+// - telemetry:top_users          (sorted set: API-key name → request count)
+// - telemetry:top_endpoints      (sorted set: endpoint → request count)
+
+const getTelemetryKeys = (userId) => {
+  const prefix = `telemetry:${userId}`;
+  return {
+    total: `${prefix}:total_requests`,
+    allowed: `${prefix}:allowed_requests`,
+    blocked: `${prefix}:blocked_requests`,
+    topUsers: `${prefix}:top_users`,
+    topEndpoints: `${prefix}:top_endpoints`
+  };
+};
+
+
+const logAnalytics = async (userId, identifier, endpoint, allowed) => {
   const redis = getRedisClient();
 
   if (!redis || redis.status !== 'ready') return;
 
+  const keys = getTelemetryKeys(userId);
+
   try {
     const pipeline = redis.pipeline();
 
-    pipeline.incr('telemetry:total_requests');
+    pipeline.incr(keys.total);
 
     if (allowed) {
-      pipeline.incr('telemetry:allowed_requests');
+      pipeline.incr(keys.allowed);
     } else {
-      pipeline.incr('telemetry:blocked_requests');
+      pipeline.incr(keys.blocked);
     }
 
     const activeIdentifier = identifier || 'anonymous';
     const activeEndpoint = endpoint || '/unknown';
 
-    pipeline.zincrby('telemetry:top_users', 1, activeIdentifier);
-    pipeline.zincrby('telemetry:top_endpoints', 1, activeEndpoint);
+    pipeline.zincrby(keys.topUsers, 1, activeIdentifier);
+    pipeline.zincrby(keys.topEndpoints, 1, activeEndpoint);
 
     await pipeline.exec();
   } catch (err) {
@@ -99,4 +120,3 @@ module.exports = {
   getStats,
   resetStats
 };
-

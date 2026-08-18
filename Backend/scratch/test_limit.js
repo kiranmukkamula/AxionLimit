@@ -128,7 +128,8 @@ async function runTests() {
     console.log('✅ Real Redis Client detected.');
   }
 
-  await telemetry.resetStats();
+  const telemetryUserId = 'test_integration_user_123';
+  await telemetry.resetStats(telemetryUserId);
 
   try {
     console.log('👤 Seeding mock user in MongoDB...');
@@ -166,7 +167,7 @@ async function runTests() {
 
     for (let i = 1; i <= 5; i++) {
       const res = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
-      await telemetry.logAnalytics(apiKeyDoc.name, endpoint, res.allowed);
+      await telemetry.logAnalytics(telemetryUserId, apiKeyDoc.name, endpoint, res.allowed);
       console.log(`  Request #${i}: Allowed? ${res.allowed} | Remaining: ${res.remaining}`);
       
       if (!res.allowed) {
@@ -176,7 +177,7 @@ async function runTests() {
 
     console.log('\n🚫 Testing Blocked Zone (Sending 6th request)...');
     const resBlocked = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
-    await telemetry.logAnalytics(apiKeyDoc.name, endpoint, resBlocked.allowed);
+    await telemetry.logAnalytics(telemetryUserId, apiKeyDoc.name, endpoint, resBlocked.allowed);
     console.log(`  Request #6: Allowed? ${resBlocked.allowed} | Remaining: ${resBlocked.remaining} | RetryAfter: ${resBlocked.retryAfter}s`);
     
     if (resBlocked.allowed) {
@@ -187,7 +188,7 @@ async function runTests() {
     }
 
     console.log('\n📊 Verifying Telemetry counters and ZSETs...');
-    const stats = await telemetry.getStats();
+    const stats = await telemetry.getStats(telemetryUserId);
     console.log('  Current stats:', stats);
     
     if (stats.total !== 6) {
@@ -246,7 +247,7 @@ async function runTests() {
     console.log('\n🧹 Cleaning up test seeding data in MongoDB...');
     await User.deleteOne({ _id: user._id });
     await ApiKey.deleteOne({ _id: apiKeyDoc._id });
-    await telemetry.resetStats();
+    await telemetry.resetStats(telemetryUserId);
     console.log('✅ Seeding data cleaned up.');
 
     console.log('\n🎉 ALL TESTS PASSED SUCCESSFULLY! AxionLimit is production-ready.');
@@ -262,4 +263,3 @@ async function runTests() {
 }
 
 runTests();
-
