@@ -3,7 +3,7 @@ const axionLimit = require('./index');
 
 const app = express();
 
-const API_KEY = 'ax_paste_your_key_here';
+const API_KEY = 'ax_311cc80e38d05ed1049ee3121f145910';
 
 app.use(axionLimit({
   apiKey: API_KEY,

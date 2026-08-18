@@ -3,6 +3,7 @@ const User = require('../models/User');
 const ApiKey = require('../models/ApiKey');
 const rateLimiter = require('../services/rateLimiter');
 const telemetry = require('../services/telemetry');
+const { hashApiKey, generateApiKey } = require('../services/apiKeySecurity');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -149,9 +150,11 @@ async function runTests() {
 
     console.log('🔑 Seeding mock API Key in MongoDB...');
     const rawKey = 'ax_test_integration_key_999';
-    await ApiKey.deleteOne({ key: rawKey });
+    const keyHash = hashApiKey(rawKey);
+    await ApiKey.deleteOne({ keyHash });
     const apiKeyDoc = new ApiKey({
-      key: rawKey,
+      keyHash,
+      keyPrefix: generateApiKey().keyPrefix,
       userId: user._id,
       name: 'Integration Test Key',
       rateLimit: {
@@ -166,7 +169,7 @@ async function runTests() {
     const endpoint = '/api/v1/resource';
 
     for (let i = 1; i <= 5; i++) {
-      const res = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
+      const res = await rateLimiter.isAllowed(keyHash, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
       await telemetry.logAnalytics(telemetryUserId, apiKeyDoc.name, endpoint, res.allowed);
       console.log(`  Request #${i}: Allowed? ${res.allowed} | Remaining: ${res.remaining}`);
       
@@ -176,7 +179,7 @@ async function runTests() {
     }
 
     console.log('\n🚫 Testing Blocked Zone (Sending 6th request)...');
-    const resBlocked = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
+    const resBlocked = await rateLimiter.isAllowed(keyHash, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
     await telemetry.logAnalytics(telemetryUserId, apiKeyDoc.name, endpoint, resBlocked.allowed);
     console.log(`  Request #6: Allowed? ${resBlocked.allowed} | Remaining: ${resBlocked.remaining} | RetryAfter: ${resBlocked.retryAfter}s`);
     
@@ -214,7 +217,7 @@ async function runTests() {
       await sleep(11000);
 
       console.log('⚡ Testing rate limiter recovery...');
-      const resRecovered = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
+      const resRecovered = await rateLimiter.isAllowed(keyHash, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
       console.log(`  Request #7 (After sleep): Allowed? ${resRecovered.allowed} | Remaining: ${resRecovered.remaining}`);
       
       if (!resRecovered.allowed) {
@@ -224,7 +227,7 @@ async function runTests() {
     } else {
       console.log('\n⏳ Simulating 11-second sleep for mock Redis...');
       const futureNow = Date.now() + 11000;
-      const key = `rate_limit:${rawKey}`;
+      const key = `rate_limit:${keyHash}`;
       const [allowedStatus, remaining] = await redis.checkRateLimit(key, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs, futureNow, `mock_future_req`);
       console.log(`  Mocked Request (Future): Allowed? ${allowedStatus === 1} | Remaining: ${remaining}`);
       if (allowedStatus !== 1) {
@@ -236,7 +239,7 @@ async function runTests() {
     console.log('\n🛠️ Testing Fail-Open Strategy when Redis is offline...');
     
     redis.status = 'end'; 
-    const resFailOpen = await rateLimiter.isAllowed(rawKey, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
+    const resFailOpen = await rateLimiter.isAllowed(keyHash, apiKeyDoc.rateLimit.limit, apiKeyDoc.rateLimit.windowMs);
     console.log(`  Fail-open Request: Allowed? ${resFailOpen.allowed} | Remaining: ${resFailOpen.remaining}`);
     
     if (!resFailOpen.allowed) {

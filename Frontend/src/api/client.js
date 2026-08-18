@@ -17,6 +17,8 @@ export const getProfile = () => api.get('/auth/me');
 
 export const getApiKeys = () => api.get('/api/keys');
 export const createApiKey = (data) => api.post('/api/keys', data);
+export const updateApiKey = (id, data) => api.patch(`/api/keys/${id}`, data);
+export const rotateApiKey = (id) => api.post(`/api/keys/${id}/rotate`);
 export const deleteApiKey = (id) => api.delete(`/api/keys/${id}`);
 
 export const getStats = () => api.get('/api/analytics/stats');
@@ -28,4 +30,3 @@ export const checkRateLimit = (apiKey, endpoint) =>
   });
 
 export default api;
-

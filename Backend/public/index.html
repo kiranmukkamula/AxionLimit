@@ -1119,7 +1119,7 @@
       keys.forEach(k => {
         // Option select
         const option = document.createElement('option');
-        option.value = k.key;
+        option.value = '';
         option.dataset.limit = k.rateLimit.limit;
         option.text = `${k.name} (${k.rateLimit.limit} req/min)`;
         selectEl.appendChild(option);
@@ -1134,13 +1134,7 @@
               <span class="key-badge">${k.rateLimit.limit} req/min</span>
             </div>
             <div class="key-string-wrapper">
-              <span class="key-string" id="str-${k._id}">${censorKey(k.key)}</span>
-              <button onclick="toggleKeyReveal('${k._id}', '${k.key}')" class="btn-icon" title="Toggle visibility">
-                <i class="fa-solid fa-eye" id="eye-${k._id}"></i>
-              </button>
-              <button onclick="copyToClipboard('${k.key}')" class="btn-icon" title="Copy Key">
-                <i class="fa-solid fa-copy"></i>
-              </button>
+              <span class="key-string">${k.keyIdentifier}</span>
             </div>
           </div>
           <button onclick="deleteApiKey('${k._id}')" class="btn-icon delete" title="Revoke API Key">
@@ -1199,7 +1193,8 @@
         const data = await res.json();
 
         if (res.status === 201) {
-          showToast('API Key generated successfully!');
+          prompt('Copy this API key now. It will not be shown again:', data.rawKey);
+          showToast('API Key generated. Copy it from the one-time dialog.');
           labelInput.value = '';
           await fetchApiKeys();
         } else {

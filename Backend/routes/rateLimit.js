@@ -5,27 +5,27 @@ const { verifyApiKey, verifyJWT } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.all('/check-limit', verifyApiKey, async (request, response) => {
+router.all('/check-limit', verifyApiKey, async (req, res) => {
   try {
-    const { key: apiKeyIdentifier, userId, limit: requestLimit, windowMs: windowDurationMs, name: apiKeyName } = request.apiKeyMetadata;
-    const requestedEndpoint = request.query.endpoint || request.body.endpoint || '/api/default';
+    const { keyHash: apiKeyIdentifier, limit: requestLimit, windowMs: windowDurationMs, name: apiKeyName } = req.apiKeyMetadata;
+    const requestedEndpoint = req.query.endpoint || req.body.endpoint || '/api/default';
 
     const rateLimitResult = await rateLimiter.isAllowed(apiKeyIdentifier, requestLimit, windowDurationMs);
 
-    telemetry.logAnalytics(userId, apiKeyName, requestedEndpoint, rateLimitResult.allowed);
+    telemetry.logAnalytics(apiKeyName, requestedEndpoint, rateLimitResult.allowed);
 
-    response.setHeader('X-RateLimit-Limit', requestLimit);
-    response.setHeader('X-RateLimit-Remaining', rateLimitResult.remaining);
-    response.setHeader('X-RateLimit-Reset', rateLimitResult.retryAfter);
+    res.setHeader('X-RateLimit-Limit', requestLimit);
+    res.setHeader('X-RateLimit-Remaining', rateLimitResult.remaining);
+    res.setHeader('X-RateLimit-Reset', rateLimitResult.retryAfter);
 
     if (rateLimitResult.allowed) {
-      return response.status(200).json({
+      return res.status(200).json({
         allowed: true,
         remaining: rateLimitResult.remaining,
         retryAfter: 0
       });
     } else {
-      return response.status(429).json({
+      return res.status(429).json({
         allowed: false,
         remaining: 0,
         retryAfter: rateLimitResult.retryAfter
@@ -33,7 +33,7 @@ router.all('/check-limit', verifyApiKey, async (request, response) => {
     }
   } catch (rateLimitRequestError) {
     console.error('❌ Error checking rate limit:', rateLimitRequestError);
-    return response.status(200).json({
+    return res.status(200).json({
       allowed: true,
       remaining: 1,
       retryAfter: 0,
@@ -44,7 +44,7 @@ router.all('/check-limit', verifyApiKey, async (request, response) => {
 
 router.get('/analytics/stats', verifyJWT, async (req, res) => {
   try {
-    const stats = await telemetry.getStats(req.user.userId);
+    const stats = await telemetry.getStats();
     return res.status(200).json({
       success: true,
       stats
@@ -57,7 +57,7 @@ router.get('/analytics/stats', verifyJWT, async (req, res) => {
 
 router.post('/analytics/reset', verifyJWT, async (req, res) => {
   try {
-    await telemetry.resetStats(req.user.userId);
+    await telemetry.resetStats();
     return res.status(200).json({
       success: true,
       message: 'Telemetry counters and rankings reset successfully.'

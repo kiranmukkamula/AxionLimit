@@ -1,11 +1,15 @@
 const mongoose = require('mongoose');
 
 const ApiKeySchema = new mongoose.Schema({
-  key: {
+  keyHash: {
     type: String,
     required: true,
     unique: true,
     index: true
+  },
+  keyPrefix: {
+    type: String,
+    required: true
   },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -22,6 +26,20 @@ const ApiKeySchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  label: {
+    type: String,
+    trim: true,
+    default: ''
+  },
+  environment: {
+    type: String,
+    enum: ['dev', 'staging', 'prod'],
+    default: 'dev'
+  },
+  expiresAt: {
+    type: Date,
+    default: null
+  },
   rateLimit: {
     limit: {
       type: Number,
@@ -32,11 +50,15 @@ const ApiKeySchema = new mongoose.Schema({
       default: 60000
     }
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+}, { timestamps: true });
+
+// Hashes are needed internally for authentication but are never serialized.
+ApiKeySchema.set('toJSON', {
+  transform: (_doc, ret) => {
+    delete ret.keyHash;
+    delete ret.keyPrefix;
+    return ret;
   }
 });
 
 module.exports = mongoose.model('ApiKey', ApiKeySchema);
-

@@ -1,141 +1,128 @@
 const express = require('express');
-const crypto = require('crypto');
 const ApiKey = require('../models/ApiKey');
 const { verifyJWT } = require('../middleware/auth');
 const { getRedisClient } = require('../config/db');
+const { generateApiKey, publicApiKey } = require('../services/apiKeySecurity');
 
 const router = express.Router();
-
+const ENVIRONMENTS = new Set(['dev', 'staging', 'prod']);
 router.use(verifyJWT);
+
+function validateKeyInput(body, { partial = false } = {}) {
+  const updates = {};
+  if (!partial || body.name !== undefined) {
+    if (typeof body.name !== 'string' || !body.name.trim()) return { error: 'A key name is required.' };
+    updates.name = body.name.trim();
+  }
+  if (body.label !== undefined) {
+    if (typeof body.label !== 'string') return { error: 'Label must be text.' };
+    updates.label = body.label.trim();
+  }
+  if (body.environment !== undefined) {
+    if (!ENVIRONMENTS.has(body.environment)) return { error: 'Environment must be dev, staging, or prod.' };
+    updates.environment = body.environment;
+  }
+  if (body.limit !== undefined) {
+    const value = Number.parseInt(body.limit, 10);
+    if (!Number.isInteger(value) || value < 1) return { error: 'Limit must be a positive integer.' };
+    updates['rateLimit.limit'] = value;
+  }
+  if (body.windowMs !== undefined) {
+    const value = Number.parseInt(body.windowMs, 10);
+    if (!Number.isInteger(value) || value < 1000) return { error: 'Window must be at least 1000ms.' };
+    updates['rateLimit.windowMs'] = value;
+  }
+  if (body.expiresAt !== undefined) {
+    if (body.expiresAt === null || body.expiresAt === '') updates.expiresAt = null;
+    else {
+      const value = new Date(body.expiresAt);
+      if (Number.isNaN(value.getTime()) || value <= new Date()) return { error: 'Expiration must be a future date.' };
+      updates.expiresAt = value;
+    }
+  }
+  if (body.isActive !== undefined) {
+    if (typeof body.isActive !== 'boolean') return { error: 'isActive must be true or false.' };
+    updates.isActive = body.isActive;
+  }
+  return { updates };
+}
+
+async function invalidateApiKeyCache(keyHash) {
+  const redis = getRedisClient();
+  if (redis && redis.status === 'ready') await redis.del(`apikey:${keyHash}`);
+}
 
 router.get('/', async (req, res) => {
   try {
     const keys = await ApiKey.find({ userId: req.user.userId }).sort({ createdAt: -1 });
-    return res.status(200).json({ success: true, keys });
-  } catch (err) {
-    console.error('❌ Failed to retrieve API keys:', err);
-    return res.status(500).json({ error: 'Failed to retrieve API keys.' });
-  }
+    return res.json({ success: true, keys: keys.map(publicApiKey) });
+  } catch (err) { return res.status(500).json({ error: 'Failed to retrieve API keys.' }); }
 });
 
 router.post('/', async (req, res) => {
-  const authenticatedUserId = req.user.userId;
-  const { name: apiKeyName, limit: requestedLimit, windowMs: requestedWindowMs } = req.body;
-  const currentUtcDate = new Date().toISOString().slice(0, 10);
-  // Redis record #2: per-user, per-day API-key creation counter.
-  // Example key: `apikey_limit:developer-id:2026-08-17`
-  // It limits a developer to three newly generated API keys per day.
-  const dailyApiKeyCreationQuotaKey = `apikey_limit:${authenticatedUserId}:${currentUtcDate}`;
-  const redisClient = getRedisClient();
-
-  let quotaExceeded = false;
-  let currentQuotaCount = 0;
-
-  if (redisClient && redisClient.status === 'ready') {
-    try {
-      currentQuotaCount = await redisClient.incr(dailyApiKeyCreationQuotaKey);
-      if (currentQuotaCount === 1) {
-        const now = new Date();
-        const endOfDay = new Date(now).setUTCHours(23, 59, 59, 999);
-        const ttlSeconds = Math.max(1, Math.ceil((endOfDay - now) / 1000));
-        await redisClient.expire(dailyApiKeyCreationQuotaKey, ttlSeconds);
-      }
-      if (currentQuotaCount > 3) {
-        quotaExceeded = true;
-      }
-    } catch (err) {
-      console.error('⚠️ Redis error checking key quota, falling back to DB:', err);
-      const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
-      const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
-      const dbCount = await ApiKey.countDocuments({
-        userId: authenticatedUserId,
-        createdAt: { $gte: startOfDay, $lte: endOfDay }
-      });
-      if (dbCount >= 3) quotaExceeded = true;
-    }
-  }
-  else {
-    console.warn('⚠️ Redis offline. Checking daily quota in MongoDB.');
-    const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
-    const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
-    const dbCount = await ApiKey.countDocuments({
-      userId: authenticatedUserId,
-      createdAt: { $gte: startOfDay, $lte: endOfDay }
-    });
-    if (dbCount >= 3) quotaExceeded = true;
-  }
-
-  if (quotaExceeded) {
-    if (redisClient && redisClient.status === 'ready' && currentQuotaCount > 3) {
-      try {
-        await redisClient.decr(dailyApiKeyCreationQuotaKey);
-      } catch (e) { }
-    }
-    return res.status(429).json({
-      error: 'Daily API key generation quota (max 3 keys/day) has been exceeded.'
-    });
-  }
-
+  const userId = req.user.userId;
+  const input = validateKeyInput(req.body);
+  if (input.error) return res.status(400).json({ error: input.error });
+  const redis = getRedisClient();
+  const quotaKey = `apikey_limit:${userId}:${new Date().toISOString().slice(0, 10)}`;
+  let quotaIncremented = false;
   try {
-    const generatedApiKeyValue = 'ax_' + crypto.randomBytes(24).toString('hex');
-    const apiKeyDocumentToCreate = new ApiKey({
-      key: generatedApiKeyValue,
-      userId: authenticatedUserId,
-      name: apiKeyName || `API Key ${new Date().toLocaleDateString()}`,
-      rateLimit: {
-        limit: requestedLimit ? parseInt(requestedLimit, 10) : 100,
-        windowMs: requestedWindowMs ? parseInt(requestedWindowMs, 10) : 60000
-      }
-    });
-
-    await apiKeyDocumentToCreate.save();
-
-    return res.status(201).json({
-      success: true,
-      message: 'API Key generated successfully.',
-      key: apiKeyDocumentToCreate
-    });
-  } catch (err) {
-    console.error('❌ Error creating API key:', err);
-    if (redisClient && redisClient.status === 'ready') {
-      try {
-        await redisClient.decr(dailyApiKeyCreationQuotaKey);
-      } catch (e) { }
+    let count;
+    if (redis && redis.status === 'ready') {
+      count = await redis.incr(quotaKey); quotaIncremented = true;
+      if (count === 1) await redis.expire(quotaKey, Math.max(1, Math.ceil((new Date().setUTCHours(23, 59, 59, 999) - Date.now()) / 1000)));
+    } else {
+      const start = new Date(); start.setHours(0, 0, 0, 0);
+      count = await ApiKey.countDocuments({ userId, createdAt: { $gte: start } });
     }
-    return res.status(500).json({ error: 'Failed to generate API Key.' });
+    if (count > 3) {
+      if (quotaIncremented) await redis.decr(quotaKey);
+      return res.status(429).json({ error: 'Daily API key generation quota (max 3 keys/day) has been exceeded.' });
+    }
+    const generated = generateApiKey();
+    const key = await ApiKey.create({ userId, keyHash: generated.keyHash, keyPrefix: generated.keyPrefix, name: input.updates.name,
+      label: input.updates.label || '', environment: input.updates.environment || 'dev', expiresAt: input.updates.expiresAt || null,
+      rateLimit: { limit: input.updates['rateLimit.limit'] || 100, windowMs: input.updates['rateLimit.windowMs'] || 60000 } });
+    return res.status(201).json({ success: true, message: 'Copy this API key now; it will not be shown again.', rawKey: generated.rawKey, key: publicApiKey(key) });
+  } catch (err) {
+    if (quotaIncremented && redis && redis.status === 'ready') await redis.decr(quotaKey).catch(() => {});
+    console.error('Error creating API key:', err);
+    return res.status(500).json({ error: 'Failed to generate API key.' });
   }
+});
+
+router.patch('/:id', async (req, res) => {
+  const input = validateKeyInput(req.body, { partial: true });
+  if (input.error) return res.status(400).json({ error: input.error });
+  if (!Object.keys(input.updates).length) return res.status(400).json({ error: 'No supported key fields provided.' });
+  try {
+    const key = await ApiKey.findOneAndUpdate({ _id: req.params.id, userId: req.user.userId }, { $set: input.updates }, { new: true, runValidators: true });
+    if (!key) return res.status(404).json({ error: 'API key not found or unauthorized.' });
+    await invalidateApiKeyCache(key.keyHash).catch(err => console.error('Failed to clear API key cache:', err));
+    return res.json({ success: true, key: publicApiKey(key) });
+  } catch (err) { return res.status(500).json({ error: 'Failed to update API key.' }); }
+});
+
+router.post('/:id/rotate', async (req, res) => {
+  try {
+    const key = await ApiKey.findOne({ _id: req.params.id, userId: req.user.userId });
+    if (!key) return res.status(404).json({ error: 'API key not found or unauthorized.' });
+    const oldHash = key.keyHash;
+    const generated = generateApiKey();
+    key.keyHash = generated.keyHash; key.keyPrefix = generated.keyPrefix; key.isActive = true;
+    await key.save();
+    await invalidateApiKeyCache(oldHash).catch(err => console.error('Failed to clear old API key cache:', err));
+    return res.json({ success: true, message: 'Copy the rotated API key now; it will not be shown again.', rawKey: generated.rawKey, key: publicApiKey(key) });
+  } catch (err) { console.error('Error rotating API key:', err); return res.status(500).json({ error: 'Failed to rotate API key.' }); }
 });
 
 router.delete('/:id', async (req, res) => {
   try {
-    const keyId = req.params.id;
-    const userId = req.user.userId;
-
-    const keyDoc = await ApiKey.findOneAndDelete({ _id: keyId, userId });
-
-    if (!keyDoc) {
-      return res.status(404).json({ error: 'API key not found or unauthorized.' });
-    }
-
-    const redis = getRedisClient();
-    if (redis && redis.status === 'ready') {
-      // Redis record #1 again: remove this key's metadata cache after revocation.
-      const cacheKey = `apikey:${keyDoc.key}`;
-      try {
-        await redis.del(cacheKey);
-      } catch (cacheErr) {
-        console.error('⚠️ Failed to delete API key from Redis cache:', cacheErr);
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'API key revoked and deleted successfully.'
-    });
-  } catch (err) {
-    console.error('❌ Error deleting API key:', err);
-    return res.status(500).json({ error: 'Failed to revoke API key.' });
-  }
+    const key = await ApiKey.findOneAndDelete({ _id: req.params.id, userId: req.user.userId });
+    if (!key) return res.status(404).json({ error: 'API key not found or unauthorized.' });
+    await invalidateApiKeyCache(key.keyHash).catch(err => console.error('Failed to clear API key cache:', err));
+    return res.json({ success: true, message: 'API key revoked and deleted successfully.' });
+  } catch (err) { return res.status(500).json({ error: 'Failed to revoke API key.' }); }
 });
 
 module.exports = router;

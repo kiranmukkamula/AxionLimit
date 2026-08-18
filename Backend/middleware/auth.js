@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const ApiKey = require('../models/ApiKey');
 const { getRedisClient } = require('../config/db');
+const { hashApiKey, isExpired } = require('../services/apiKeySecurity');
 require('dotenv').config();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret_axionlimit_key_12345!';
@@ -24,25 +25,28 @@ const verifyJWT = (req, res, next) => {
 };
 
 const verifyApiKey = async (req, res, next) => {
-  const suppliedApiKey = req.headers['x-api-key'] || req.query.apiKey || req.body.apiKey;
+  // Accept secrets only in a header so they are not placed in URLs or request bodies.
+  const suppliedApiKey = req.headers['x-api-key'];
 
   if (!suppliedApiKey) {
     return res.status(401).json({ error: 'API key is missing.' });
   }
 
+  const keyHash = hashApiKey(suppliedApiKey);
   const redisClient = getRedisClient();
-  // Redis record #1: API-key metadata cache (a normal Redis string).
-  // Example key: `apikey:ax_abc123`
-  // Value: JSON containing the key's owner, name, request limit, and window.
-  // This is NOT the request timestamp data used to enforce the rate limit.
-  const apiKeyMetadataCacheKey = `apikey:${suppliedApiKey}`;
+  // Cache keys and values contain only the SHA-256 digest and non-secret metadata.
+  const apiKeyMetadataCacheKey = `apikey:${keyHash}`;
 
   if (redisClient && redisClient.status === 'ready') {
     try {
       const cachedApiKeyMetadata = await redisClient.get(apiKeyMetadataCacheKey);
       if (cachedApiKeyMetadata) {
-        req.apiKeyMetadata = JSON.parse(cachedApiKeyMetadata);
-        return next();
+        const metadata = JSON.parse(cachedApiKeyMetadata);
+        if (metadata.isActive && !isExpired(metadata.expiresAt)) {
+          req.apiKeyMetadata = metadata;
+          return next();
+        }
+        await redisClient.del(apiKeyMetadataCacheKey);
       }
   } catch (cacheReadError) {
     console.error('⚠️ Redis cache read error in API key auth, falling back to DB:', cacheReadError);
@@ -50,18 +54,20 @@ const verifyApiKey = async (req, res, next) => {
   }
 
   try {
-    const apiKeyDocument = await ApiKey.findOne({ key: suppliedApiKey, isActive: true });
+    const apiKeyDocument = await ApiKey.findOne({ keyHash, isActive: true });
 
-    if (!apiKeyDocument) {
+    if (!apiKeyDocument || isExpired(apiKeyDocument.expiresAt)) {
       return res.status(401).json({ error: 'Invalid or inactive API key.' });
     }
 
     const apiKeyMetadata = {
-      key: apiKeyDocument.key,
+      keyHash: apiKeyDocument.keyHash,
       userId: apiKeyDocument.userId.toString(),
       name: apiKeyDocument.name,
       limit: apiKeyDocument.rateLimit.limit,
-      windowMs: apiKeyDocument.rateLimit.windowMs
+      windowMs: apiKeyDocument.rateLimit.windowMs,
+      isActive: apiKeyDocument.isActive,
+      expiresAt: apiKeyDocument.expiresAt || null
     };
 
     if (redisClient && redisClient.status === 'ready') {

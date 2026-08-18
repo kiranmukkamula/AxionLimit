@@ -6,6 +6,7 @@ export default function SandboxPage() {
   const toast = useToast();
   const [keys, setKeys] = useState([]);
   const [selectedKey, setSelectedKey] = useState('');
+  const [rawKey, setRawKey] = useState('');
   const [endpoint, setEndpoint] = useState('/api/v1/example');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -18,7 +19,7 @@ export default function SandboxPage() {
       .then(res => {
         const k = res.data.keys || [];
         setKeys(k);
-        if (k.length > 0) setSelectedKey(k[0].key);
+        if (k.length > 0) setSelectedKey(k[0]._id);
       })
       .catch(() => toast('Failed to load keys.', 'error'));
   }, []);
@@ -34,13 +35,13 @@ export default function SandboxPage() {
   }, [autoFire, selectedKey, endpoint]);
 
   const fireRequest = async () => {
-    if (!selectedKey) {
-      toast('Select an API key first.', 'error');
+    if (!rawKey) {
+      toast('Paste an API key first.', 'error');
       return;
     }
     setLoading(true);
     try {
-      const res = await checkRateLimit(selectedKey, endpoint);
+      const res = await checkRateLimit(rawKey, endpoint);
       const data = res.data;
       setResult({ ...data, status: res.status });
       setHistory(prev => [
@@ -59,7 +60,7 @@ export default function SandboxPage() {
     }
   };
 
-  const selectedKeyObj = keys.find(k => k.key === selectedKey);
+  const selectedKeyObj = keys.find(k => k._id === selectedKey);
 
   return (
     <div className="page-layout">
@@ -86,7 +87,7 @@ export default function SandboxPage() {
                   onChange={e => setSelectedKey(e.target.value)}
                 >
                   {keys.map(k => (
-                    <option key={k._id} value={k.key}>{k.name} ({k.rateLimit.limit}r/{k.rateLimit.windowMs/1000}s)</option>
+                    <option key={k._id} value={k._id}>{k.name} — {k.keyIdentifier} ({k.rateLimit.limit}r/{k.rateLimit.windowMs/1000}s)</option>
                   ))}
                 </select>
               )}
@@ -103,6 +104,11 @@ export default function SandboxPage() {
               </div>
             )}
 
+            <div style={{ marginBottom: 14 }}>
+              <label className="label">Paste API Key</label>
+              <input className="input" type="password" value={rawKey} onChange={e => setRawKey(e.target.value)} placeholder="ax_…" autoComplete="off" />
+            </div>
+
             <div style={{ marginBottom: 16 }}>
               <label className="label">Target Endpoint (label only)</label>
               <input
@@ -118,14 +124,14 @@ export default function SandboxPage() {
                 className="btn btn-primary"
                 style={{ flex: 1 }}
                 onClick={fireRequest}
-                disabled={loading || !selectedKey}
+                disabled={loading || !rawKey}
               >
                 {loading ? <><div className="spinner" style={{ width: 16, height: 16, borderTopColor: '#000' }} /> Sending...</> : '🚀 Fire Request'}
               </button>
               <button
                 className={`btn ${autoFire ? 'btn-danger' : 'btn-ghost'}`}
                 onClick={() => setAutoFire(f => !f)}
-                disabled={!selectedKey}
+                disabled={!rawKey}
               >
                 {autoFire ? '⏹ Stop' : '⚡ Auto-Fire'}
               </button>
@@ -247,4 +253,3 @@ export default function SandboxPage() {
     </div>
   );
 }
-

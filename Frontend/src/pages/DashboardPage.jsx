@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../components/Toast';
 import {
   getStats, resetStats,
-  getApiKeys, createApiKey, deleteApiKey as deleteKey
+  getApiKeys, createApiKey, rotateApiKey, updateApiKey, deleteApiKey as deleteKey
 } from '../api/client';
 
 function StatCard({ label, value, colorClass, icon, sub }) {
@@ -49,28 +49,23 @@ function Leaderboard({ title, items }) {
   );
 }
 
-function KeyItem({ k, onDelete, onCopy }) {
-  const [revealed, setRevealed] = useState(false);
-
-  const censor = (key) => key.slice(0, 6) + '•'.repeat(16) + key.slice(-4);
-
+function KeyItem({ k, onDelete, onRotate, onToggle }) {
   return (
     <div className="key-item">
       <div className="key-meta">
         <div className="key-name">{k.name}</div>
         <div className="key-string-row">
-          <span className="key-string">{revealed ? k.key : censor(k.key)}</span>
-          <button className="btn-icon" onClick={() => setRevealed(r => !r)} title="Toggle visibility">
-            {revealed ? '🙈' : '👁'}
-          </button>
-          <button className="btn-icon" onClick={() => onCopy(k.key)} title="Copy Key">📋</button>
+          <span className="key-string">{k.keyIdentifier}</span>
         </div>
       </div>
       <div className="key-actions">
         <span className="badge badge-accent" style={{ flexShrink: 0 }}>
           {k.rateLimit.limit}r / {k.rateLimit.windowMs / 1000}s
         </span>
+        <span className={`badge ${k.isActive ? 'badge-green' : 'badge-red'}`}>{k.isActive ? 'Active' : 'Disabled'}</span>
+        <button className="btn-icon" onClick={() => onToggle(k)} title={k.isActive ? 'Disable key' : 'Enable key'}>{k.isActive ? '⏸' : '▶'}</button>
         <button className="btn-icon danger" onClick={() => onDelete(k._id)} title="Revoke">🗑</button>
+        <button className="btn-icon" onClick={() => onRotate(k._id)} title="Rotate key">🔄</button>
       </div>
     </div>
   );
@@ -87,8 +82,9 @@ function CreateKeyForm({ onCreated }) {
   const handleCreate = async () => {
     setLoading(true);
     try {
-      await createApiKey({ name, limit: parseInt(limit), windowMs: parseInt(windowMs) });
-      toast('API Key created!', 'success');
+      const res = await createApiKey({ name, limit: parseInt(limit), windowMs: parseInt(windowMs) });
+      onCreated(res.data.rawKey);
+      toast('API Key created — copy it from the one-time display.', 'success');
       setName(''); setLimit(100); setWindowMs(60000); setOpen(false);
       onCreated();
     } catch (err) {
@@ -158,6 +154,7 @@ export default function DashboardPage() {
 
   const [keys, setKeys] = useState([]);
   const [keysLoading, setKeysLoading] = useState(true);
+  const [oneTimeKey, setOneTimeKey] = useState('');
 
   const gridColor = theme === 'dark' ? '#222' : '#E5E7EB';
   const textColor = theme === 'dark' ? '#888' : '#9CA3AF';
@@ -214,6 +211,27 @@ export default function DashboardPage() {
   const handleCopy = (key) => {
     navigator.clipboard.writeText(key);
     toast('Key copied to clipboard!', 'success');
+  };
+
+  const handleRotate = async (id) => {
+    try {
+      const res = await rotateApiKey(id);
+      setOneTimeKey(res.data.rawKey);
+      toast('Key rotated — copy the new value now.', 'success');
+      loadKeys();
+    } catch (err) {
+      toast(err.response?.data?.error || 'Failed to rotate key.', 'error');
+    }
+  };
+
+  const handleToggle = async (key) => {
+    try {
+      await updateApiKey(key._id, { isActive: !key.isActive });
+      toast(`Key ${key.isActive ? 'disabled' : 'enabled'}.`, 'success');
+      loadKeys();
+    } catch (err) {
+      toast(err.response?.data?.error || 'Failed to update key.', 'error');
+    }
   };
 
   const handleReset = async () => {
@@ -288,8 +306,15 @@ export default function DashboardPage() {
         <div className="card">
           <div className="panel-title">
             API Keys
-            <CreateKeyForm onCreated={loadKeys} />
+            <CreateKeyForm onCreated={(rawKey) => { setOneTimeKey(rawKey); loadKeys(); }} />
           </div>
+          {oneTimeKey && (
+            <div className="create-key-form" style={{ marginBottom: 14 }}>
+              <label className="label">Copy this key now — it will not be shown again</label>
+              <div className="key-string-row"><code className="key-string">{oneTimeKey}</code><button className="btn-icon" onClick={() => handleCopy(oneTimeKey)}>📋</button></div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setOneTimeKey('')}>I copied it</button>
+            </div>
+          )}
           {keysLoading ? (
             <div className="empty-state"><div className="spinner" /></div>
           ) : keys.length === 0 ? (
@@ -300,7 +325,7 @@ export default function DashboardPage() {
           ) : (
             <div className="key-list">
               {keys.map(k => (
-                <KeyItem key={k._id} k={k} onDelete={handleDelete} onCopy={handleCopy} />
+                <KeyItem key={k._id} k={k} onDelete={handleDelete} onRotate={handleRotate} onToggle={handleToggle} />
               ))}
             </div>
           )}
@@ -311,4 +336,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
