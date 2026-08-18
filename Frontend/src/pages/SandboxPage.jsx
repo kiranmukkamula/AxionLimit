@@ -24,24 +24,17 @@ export default function SandboxPage() {
       .catch(() => toast('Failed to load keys.', 'error'));
   }, []);
 
-  useEffect(() => {
-    if (autoFire) {
-      const id = setInterval(fireRequest, 600);
-      setAutoInterval(id);
-      return () => clearInterval(id);
-    } else {
-      if (autoInterval) clearInterval(autoInterval);
-    }
-  }, [autoFire, selectedKey, endpoint]);
-
   const fireRequest = async () => {
-    if (!rawKey) {
-      toast('Paste an API key first.', 'error');
+    const keyToUse = rawKey.trim() ? rawKey.trim() : selectedKey;
+    const isKeyId = !rawKey.trim() && !!selectedKey;
+
+    if (!keyToUse) {
+      toast('Please select an API key or paste a raw key first.', 'error');
       return;
     }
     setLoading(true);
     try {
-      const res = await checkRateLimit(rawKey, endpoint);
+      const res = await checkRateLimit(keyToUse, endpoint, isKeyId);
       const data = res.data;
       setResult({ ...data, status: res.status });
       setHistory(prev => [
@@ -60,7 +53,20 @@ export default function SandboxPage() {
     }
   };
 
+  useEffect(() => {
+    if (autoFire) {
+      const id = setInterval(() => {
+        fireRequest();
+      }, 600);
+      setAutoInterval(id);
+      return () => clearInterval(id);
+    } else {
+      if (autoInterval) clearInterval(autoInterval);
+    }
+  }, [autoFire, selectedKey, rawKey, endpoint]);
+
   const selectedKeyObj = keys.find(k => k._id === selectedKey);
+  const hasValidKey = Boolean(rawKey.trim() || selectedKey);
 
   return (
     <div className="page-layout">
@@ -101,16 +107,22 @@ export default function SandboxPage() {
               }}>
                 <span className="badge badge-accent">Limit: {selectedKeyObj.rateLimit.limit} req</span>
                 <span className="badge badge-blue">Window: {selectedKeyObj.rateLimit.windowMs / 1000}s</span>
+                <span className={`badge ${selectedKeyObj.isActive ? 'badge-green' : 'badge-red'}`}>
+                  {selectedKeyObj.isActive ? 'Active' : 'Disabled'}
+                </span>
               </div>
             )}
 
             <div style={{ marginBottom: 14 }}>
-              <label className="label">Paste API Key</label>
-              <input className="input" type="password" value={rawKey} onChange={e => setRawKey(e.target.value)} placeholder="ax_…" autoComplete="off" />
+              <label className="label">Paste Raw API Key (Optional)</label>
+              <input className="input" type="password" value={rawKey} onChange={e => setRawKey(e.target.value)} placeholder="ax_… (Leave blank to use selected key above)" autoComplete="off" />
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                {rawKey.trim() ? '🔑 Mode: Using pasted secret key' : selectedKeyObj ? `✅ Mode: Using selected key "${selectedKeyObj.name}"` : '⚠️ Select a key above or paste raw secret'}
+              </div>
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <label className="label">Target Endpoint (label only)</label>
+              <label className="label">Target Endpoint</label>
               <input
                 className="input"
                 value={endpoint}
@@ -124,14 +136,14 @@ export default function SandboxPage() {
                 className="btn btn-primary"
                 style={{ flex: 1 }}
                 onClick={fireRequest}
-                disabled={loading || !rawKey}
+                disabled={loading || !hasValidKey}
               >
                 {loading ? <><div className="spinner" style={{ width: 16, height: 16, borderTopColor: '#000' }} /> Sending...</> : '🚀 Fire Request'}
               </button>
               <button
                 className={`btn ${autoFire ? 'btn-danger' : 'btn-ghost'}`}
                 onClick={() => setAutoFire(f => !f)}
-                disabled={!rawKey}
+                disabled={!hasValidKey}
               >
                 {autoFire ? '⏹ Stop' : '⚡ Auto-Fire'}
               </button>

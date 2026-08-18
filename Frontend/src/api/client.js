@@ -24,9 +24,9 @@ export const deleteApiKey = (id) => api.delete(`/api/keys/${id}`);
 export const getStats = () => api.get('/api/analytics/stats');
 export const resetStats = () => api.post('/api/analytics/reset');
 
-export const checkRateLimit = (apiKey, endpoint) =>
+export const checkRateLimit = (apiKeyOrId, endpoint, isKeyId = false) =>
   api.post('/api/check-limit', { endpoint }, {
-    headers: { 'x-api-key': apiKey },
+    headers: isKeyId ? { 'x-api-key-id': apiKeyOrId } : { 'x-api-key': apiKeyOrId },
   });
 
 export default api;

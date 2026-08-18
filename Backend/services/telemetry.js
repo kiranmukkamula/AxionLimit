@@ -7,24 +7,22 @@ const { getRedisClient } = require('../config/db');
 // - telemetry:top_users          (sorted set: API-key name → request count)
 // - telemetry:top_endpoints      (sorted set: endpoint → request count)
 
-const getTelemetryKeys = (userId) => {
-  const prefix = `telemetry:${userId}`;
+const getTelemetryKeys = () => {
   return {
-    total: `${prefix}:total_requests`,
-    allowed: `${prefix}:allowed_requests`,
-    blocked: `${prefix}:blocked_requests`,
-    topUsers: `${prefix}:top_users`,
-    topEndpoints: `${prefix}:top_endpoints`
+    total: 'telemetry:total_requests',
+    allowed: 'telemetry:allowed_requests',
+    blocked: 'telemetry:blocked_requests',
+    topUsers: 'telemetry:top_users',
+    topEndpoints: 'telemetry:top_endpoints'
   };
 };
 
-
-const logAnalytics = async (userId, identifier, endpoint, allowed) => {
+const logAnalytics = async (identifier, endpoint, allowed) => {
   const redis = getRedisClient();
 
   if (!redis || redis.status !== 'ready') return;
 
-  const keys = getTelemetryKeys(userId);
+  const keys = getTelemetryKeys();
 
   try {
     const pipeline = redis.pipeline();

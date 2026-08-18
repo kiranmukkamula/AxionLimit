@@ -24,6 +24,8 @@ const connectDB = async () => {
     });
 
     await mongoose.connect(mongoUri);
+    const ApiKey = require('../models/ApiKey');
+    await ApiKey.syncIndexes().catch(err => console.warn('⚠️ Sync indexes warning:', err.message));
   } catch (err) {
     console.error('❌ MongoDB initial connection failed:', err);
     process.exit(1);

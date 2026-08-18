@@ -86,7 +86,6 @@ function CreateKeyForm({ onCreated }) {
       onCreated(res.data.rawKey);
       toast('API Key created — copy it from the one-time display.', 'success');
       setName(''); setLimit(100); setWindowMs(60000); setOpen(false);
-      onCreated();
     } catch (err) {
       toast(err.response?.data?.error || 'Failed to create key.', 'error');
     } finally {
