@@ -1119,7 +1119,7 @@
       keys.forEach(k => {
         // Option select
         const option = document.createElement('option');
-        option.value = '';
+        option.value = k._id;
         option.dataset.limit = k.rateLimit.limit;
         option.text = `${k.name} (${k.rateLimit.limit} req/min)`;
         selectEl.appendChild(option);
@@ -1260,12 +1260,22 @@
       const timeString = new Date().toLocaleTimeString();
 
       try {
+        const isKeyId = key.length === 24 || !key.startsWith('ax_');
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        if (JWT_TOKEN) {
+          headers['Authorization'] = `Bearer ${JWT_TOKEN}`;
+        }
+        if (isKeyId) {
+          headers['x-api-key-id'] = key;
+        } else {
+          headers['x-api-key'] = key;
+        }
+
         const res = await fetch(`/api/check-limit`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': key
-          },
+          headers: headers,
           body: JSON.stringify({ endpoint })
         });
         
