@@ -41,6 +41,9 @@ export default function Navbar() {
         <NavLink to="/sandbox" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
           Sandbox
         </NavLink>
+        <NavLink to="/docs" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+          Docs & Integrations
+        </NavLink>
       </div>
 
       <div className="navbar-right">

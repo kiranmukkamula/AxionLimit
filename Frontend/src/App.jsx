@@ -8,6 +8,7 @@ import Navbar from './components/Navbar';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import SandboxPage from './pages/SandboxPage';
+import DocsPage from './pages/DocsPage';
 import './index.css';
 import './App.css';
 
@@ -44,6 +45,16 @@ export default function App() {
                   <ProtectedRoute>
                     <AppLayout>
                       <SandboxPage />
+                    </AppLayout>
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/docs"
+                element={
+                  <ProtectedRoute>
+                    <AppLayout>
+                      <DocsPage />
                     </AppLayout>
                   </ProtectedRoute>
                 }

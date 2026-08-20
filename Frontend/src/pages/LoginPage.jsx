@@ -6,11 +6,17 @@ import { useToast } from '../components/Toast';
 import { devLogin } from '../api/client';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { user, login } = useAuth();
   const { theme, toggle } = useTheme();
   const toast = useToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+
+  React.useEffect(() => {
+    if (user) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [user, navigate]);
 
   const handleDevLogin = async () => {
     setLoading(true);

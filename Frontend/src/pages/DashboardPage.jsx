@@ -8,6 +8,7 @@ import {
   getStats, resetStats,
   getApiKeys, createApiKey, rotateApiKey, updateApiKey, deleteApiKey as deleteKey
 } from '../api/client';
+import IntegrationSnippets from '../components/IntegrationSnippets';
 
 function StatCard({ label, value, colorClass, icon, sub }) {
   return (
@@ -49,7 +50,7 @@ function Leaderboard({ title, items }) {
   );
 }
 
-function KeyItem({ k, onDelete, onRotate, onToggle }) {
+function KeyItem({ k, onDelete, onRotate, onToggle, onViewSnippets }) {
   return (
     <div className="key-item">
       <div className="key-meta">
@@ -63,6 +64,9 @@ function KeyItem({ k, onDelete, onRotate, onToggle }) {
           {k.rateLimit.limit}r / {k.rateLimit.windowMs / 1000}s
         </span>
         <span className={`badge ${k.isActive ? 'badge-green' : 'badge-red'}`}>{k.isActive ? 'Active' : 'Disabled'}</span>
+        <button className="btn btn-xs btn-ghost" onClick={() => onViewSnippets(k.keyIdentifier)} title="View Code Snippets" style={{ fontSize: '0.75rem' }}>
+          &lt;/&gt; Code
+        </button>
         <button className="btn-icon" onClick={() => onToggle(k)} title={k.isActive ? 'Disable key' : 'Enable key'}>{k.isActive ? '⏸' : '▶'}</button>
         <button className="btn-icon danger" onClick={() => onDelete(k._id)} title="Revoke">🗑</button>
         <button className="btn-icon" onClick={() => onRotate(k._id)} title="Rotate key">🔄</button>
@@ -154,6 +158,7 @@ export default function DashboardPage() {
   const [keys, setKeys] = useState([]);
   const [keysLoading, setKeysLoading] = useState(true);
   const [oneTimeKey, setOneTimeKey] = useState('');
+  const [snippetModalKey, setSnippetModalKey] = useState(null);
 
   const gridColor = theme === 'dark' ? '#222' : '#E5E7EB';
   const textColor = theme === 'dark' ? '#888' : '#9CA3AF';
@@ -324,7 +329,14 @@ export default function DashboardPage() {
           ) : (
             <div className="key-list">
               {keys.map(k => (
-                <KeyItem key={k._id} k={k} onDelete={handleDelete} onRotate={handleRotate} onToggle={handleToggle} />
+                <KeyItem
+                  key={k._id}
+                  k={k}
+                  onDelete={handleDelete}
+                  onRotate={handleRotate}
+                  onToggle={handleToggle}
+                  onViewSnippets={(keyId) => setSnippetModalKey(keyId)}
+                />
               ))}
             </div>
           )}
@@ -332,6 +344,35 @@ export default function DashboardPage() {
 
         <Leaderboard title="👤 Top API Key Users" items={stats.topUsers} />
       </div>
+
+      {/* Code Snippets Modal */}
+      {snippetModalKey && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justify: 'center',
+          zIndex: 9999,
+          padding: 16
+        }}>
+          <div className="card" style={{
+            maxWidth: 760,
+            width: '100%',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            position: 'relative'
+          }}>
+            <div className="panel-title flex items-center justify-between" style={{ marginBottom: 12 }}>
+              <span>🛠 Integration Snippets</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setSnippetModalKey(null)}>✕ Close</button>
+            </div>
+            <IntegrationSnippets apiKey={snippetModalKey} serverUrl="http://localhost:5000" compact={true} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
