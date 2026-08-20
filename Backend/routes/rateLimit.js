@@ -5,16 +5,17 @@ const { verifyApiKey, verifyJWT } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.all('/check-limit', verifyApiKey, async (req, res) => {
+router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) => {
   try {
     const { keyHash: apiKeyIdentifier, limit: requestLimit, windowMs: windowDurationMs, name: apiKeyName } = req.apiKeyMetadata;
+    const subPath = req.path.replace(/^\/check-limit/, '');
     const requestedEndpoint =
       req.query.endpoint ||
       req.body?.endpoint ||
       req.headers['x-endpoint'] ||
       req.headers['endpoint'] ||
       req.headers['x-target-endpoint'] ||
-      '/api/default';
+      (subPath && subPath !== '/' ? subPath : '/api/default');
 
     const rateLimitResult = await rateLimiter.isAllowed(apiKeyIdentifier, requestLimit, windowDurationMs);
 
