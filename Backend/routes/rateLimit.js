@@ -8,7 +8,13 @@ const router = express.Router();
 router.all('/check-limit', verifyApiKey, async (req, res) => {
   try {
     const { keyHash: apiKeyIdentifier, limit: requestLimit, windowMs: windowDurationMs, name: apiKeyName } = req.apiKeyMetadata;
-    const requestedEndpoint = req.query.endpoint || req.body.endpoint || '/api/default';
+    const requestedEndpoint =
+      req.query.endpoint ||
+      req.body?.endpoint ||
+      req.headers['x-endpoint'] ||
+      req.headers['endpoint'] ||
+      req.headers['x-target-endpoint'] ||
+      '/api/default';
 
     const rateLimitResult = await rateLimiter.isAllowed(apiKeyIdentifier, requestLimit, windowDurationMs);
 
