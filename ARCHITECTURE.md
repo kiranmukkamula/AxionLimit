@@ -17,14 +17,13 @@ AxionLimit does this for API requests — not people.
 
 ---
 
-## The 3 Big Pieces
+## The 2 Big Pieces
 
 ```
 AxionLimit/
 │
-├── Backend/    ← The security guard (brain of the system)
-├── Frontend/   ← The control panel (dashboard you see in browser)
-└── sdk/        ← A tool developers install to use your guard in their own app
+├── Backend/    ← The security guard (brain of the system - REST API service)
+└── Frontend/   ← The control panel (dashboard & documentation in browser)
 ```
 
 ---
@@ -123,7 +122,7 @@ Backend/
 **Endpoints it creates:**
 
 **1. `GET /api/check-limit`** — This is the main one
-- A developer (or the SDK) calls this with their API key in the header
+- A developer (via their backend middleware) calls this with their API key in the header
 - It runs the rate limiter check
 - Returns `200 OK` if allowed, `429 Too Many Requests` if blocked
 - Also logs the result to telemetry (who called, which endpoint, allowed or blocked)
@@ -271,55 +270,28 @@ checkRateLimit(key)   → POST   /api/check-limit  (with x-api-key header)
 
 ---
 
-## THE SDK — The Developer Tool
-
-```
-sdk/
-├── index.js      ← The actual middleware (50 lines)
-├── package.json  ← npm package config
-├── README.md     ← How to use it
-└── test-app.js   ← A fake developer's app to test the SDK locally
-```
-
-### index.js — What the SDK Actually Does
-
-A developer installs `axion-limit-sdk` in **their own Express app**:
-
-```js
-app.use(axionLimit({ apiKey: 'ax_...', serverUrl: 'https://your-server.com' }));
-```
-
-Every time a request hits their app:
-1. SDK intercepts it
-2. SDK calls YOUR `/api/check-limit` endpoint with the API key
-3. If `200` → SDK calls `next()` → their route runs normally
-4. If `429` → SDK returns `429 Too Many Requests` to their client
-
-**The SDK contains zero logic.** All decisions happen on your backend. The SDK is just an HTTP call wrapper.
-
----
-
 ## THE FULL FLOW — A Request End-to-End
 
-### Scenario: Developer's app uses your SDK, a user hits their API
+### Scenario: Developer's app protects an API endpoint, a user hits their API
 
 ```
 User's browser
     |
     |  GET /api/weather  (to Developer's app on port 4000)
     v
-Developer's Express App (port 4000)
+Developer's Express / FastAPI / Gin / Spring Boot App
     |
-    |  SDK middleware intercepts it
+    |  Developer's HTTP Middleware intercepts request
     |
     v
-AxionLimit Backend (port 5000) — GET /api/check-limit
+AxionLimit Backend (port 5000) — GET /api/check-limit (headers: x-api-key, x-user-id)
     |
     |-- verifyApiKey middleware runs
     |     |-- Check Redis cache for this key's config  (fast path)
     |     +-- Cache miss? Check MongoDB → then cache it in Redis
     |
     |-- rateLimiter.isAllowed() runs
+    |     |-- Construct key: rate_limit:<apiKeyHash>:<userId> (or rate_limit:<apiKeyHash> if global)
     |     |-- Run Lua script in Redis atomically
     |     |-- Delete timestamps older than the window
     |     |-- Count remaining timestamps
@@ -333,9 +305,9 @@ AxionLimit Backend (port 5000) — GET /api/check-limit
              OR: { allowed: false, retryAfter: 3 }
     |
     v
-SDK receives response
-    |-- 200 → calls next() → /api/weather handler runs → user gets data  [ALLOWED]
-    +-- 429 → returns { error: 'Too Many Requests' } to user             [BLOCKED]
+Developer Middleware receives response
+    |-- 200 → calls next() / continues → /api/weather handler runs → user gets data  [ALLOWED]
+    +-- 429 → returns { error: 'Too Many Requests' } to user                         [BLOCKED]
 ```
 
 ---
@@ -398,4 +370,3 @@ apikey_limit:userId:date   → daily key creation counter (expires in 24h)
 | `api/client.js` | Frontend's collection of all backend calls |
 | `DashboardPage.jsx` | Shows charts, stats, manages API keys |
 | `SandboxPage.jsx` | Test API keys manually |
-| `sdk/index.js` | Middleware wrapper for other developers' apps |

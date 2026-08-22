@@ -17,9 +17,22 @@ router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) =>
       req.headers['x-target-endpoint'] ||
       (subPath && subPath !== '/' ? subPath : '/api/default');
 
-    const rateLimitResult = await rateLimiter.isAllowed(apiKeyIdentifier, requestLimit, windowDurationMs);
+    const endUserId =
+      req.headers['x-user-id'] ||
+      req.headers['x-client-user-id'] ||
+      req.headers['x-identifier'] ||
+      req.query.userId ||
+      req.query.user_id ||
+      req.query.identifier ||
+      req.body?.userId ||
+      req.body?.user_id ||
+      req.body?.identifier ||
+      null;
 
-    telemetry.logAnalytics(apiKeyName, requestedEndpoint, rateLimitResult.allowed);
+    const rateLimitResult = await rateLimiter.isAllowed(apiKeyIdentifier, requestLimit, windowDurationMs, endUserId);
+
+    const activeUserLabel = endUserId ? `${apiKeyName} (${endUserId})` : apiKeyName;
+    telemetry.logAnalytics(activeUserLabel, requestedEndpoint, rateLimitResult.allowed);
 
     res.setHeader('X-RateLimit-Limit', requestLimit);
     res.setHeader('X-RateLimit-Remaining', rateLimitResult.remaining);

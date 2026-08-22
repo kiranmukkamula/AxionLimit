@@ -24,9 +24,12 @@ export const deleteApiKey = (id) => api.delete(`/api/keys/${id}`);
 export const getStats = () => api.get('/api/analytics/stats');
 export const resetStats = () => api.post('/api/analytics/reset');
 
-export const checkRateLimit = (apiKeyOrId, endpoint, isKeyId = false) =>
-  api.post('/api/check-limit', { endpoint }, {
-    headers: isKeyId ? { 'x-api-key-id': apiKeyOrId } : { 'x-api-key': apiKeyOrId },
-  });
+export const checkRateLimit = (apiKeyOrId, endpoint, isKeyId = false, userId = '') => {
+  const headers = isKeyId ? { 'x-api-key-id': apiKeyOrId } : { 'x-api-key': apiKeyOrId };
+  if (userId) {
+    headers['x-user-id'] = userId;
+  }
+  return api.post('/api/check-limit', { endpoint, userId }, { headers });
+};
 
 export default api;

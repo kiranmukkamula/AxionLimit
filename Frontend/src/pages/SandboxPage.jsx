@@ -8,6 +8,7 @@ export default function SandboxPage() {
   const [selectedKey, setSelectedKey] = useState('');
   const [rawKey, setRawKey] = useState('');
   const [endpoint, setEndpoint] = useState('/api/v1/example');
+  const [userId, setUserId] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
@@ -34,18 +35,18 @@ export default function SandboxPage() {
     }
     setLoading(true);
     try {
-      const res = await checkRateLimit(keyToUse, endpoint, isKeyId);
+      const res = await checkRateLimit(keyToUse, endpoint, isKeyId, userId.trim());
       const data = res.data;
-      setResult({ ...data, status: res.status });
+      setResult({ ...data, status: res.status, targetUserId: userId.trim() });
       setHistory(prev => [
-        { allowed: data.allowed, remaining: data.remaining, time: new Date().toLocaleTimeString(), endpoint },
+        { allowed: data.allowed, remaining: data.remaining, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim() },
         ...prev.slice(0, 19)
       ]);
     } catch (err) {
       const data = err.response?.data || {};
-      setResult({ allowed: false, remaining: 0, retryAfter: data.retryAfter || 1, status: 429 });
+      setResult({ allowed: false, remaining: 0, retryAfter: data.retryAfter || 1, status: 429, targetUserId: userId.trim() });
       setHistory(prev => [
-        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint },
+        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim() },
         ...prev.slice(0, 19)
       ]);
     } finally {
@@ -121,7 +122,7 @@ export default function SandboxPage() {
               </div>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 14 }}>
               <label className="label">Target Endpoint</label>
               <input
                 className="input"
@@ -129,6 +130,19 @@ export default function SandboxPage() {
                 onChange={e => setEndpoint(e.target.value)}
                 placeholder="/api/v1/resource"
               />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label className="label">User ID / Identifier (Optional)</label>
+              <input
+                className="input"
+                value={userId}
+                onChange={e => setUserId(e.target.value)}
+                placeholder="e.g. user_101 or 192.168.1.1 (Leave blank for global key limit)"
+              />
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                {userId.trim() ? `👤 Per-user rate limiting enabled for "${userId.trim()}"` : '🌐 Global rate limiting mode (all users share quota)'}
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
@@ -168,7 +182,14 @@ export default function SandboxPage() {
                 {history.map((h, i) => (
                   <div key={i} className="history-item">
                     <div className={`history-dot ${h.allowed ? 'allowed' : 'blocked'}`} />
-                    <span style={{ flex: 1 }}>{h.endpoint}</span>
+                    <span style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>{h.endpoint}</span>
+                      {h.targetUserId && (
+                        <span className="badge badge-accent" style={{ fontSize: '0.7rem', padding: '1px 5px' }}>
+                          👤 {h.targetUserId}
+                        </span>
+                      )}
+                    </span>
                     <span style={{ color: h.allowed ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
                       {h.allowed ? 'ALLOWED' : 'BLOCKED'}
                     </span>
@@ -195,6 +216,12 @@ export default function SandboxPage() {
                   {result.allowed ? 'Request Allowed' : 'Rate Limit Exceeded'}
                 </div>
                 <div className="sandbox-meta">
+                  <div className="sandbox-meta-row">
+                    <span className="sandbox-meta-key">Rate Limit Mode</span>
+                    <span className="sandbox-meta-val" style={{ color: 'var(--accent-light)' }}>
+                      {result.targetUserId ? `👤 Per-User (${result.targetUserId})` : '🌐 Global (API Key)'}
+                    </span>
+                  </div>
                   <div className="sandbox-meta-row">
                     <span className="sandbox-meta-key">HTTP Status</span>
                     <span className="sandbox-meta-val">{result.allowed ? '200 OK' : '429 Too Many Requests'}</span>

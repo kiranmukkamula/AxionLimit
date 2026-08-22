@@ -8,21 +8,27 @@ export function getLanguageSnippets(apiKey = 'YOUR_API_KEY', serverUrl = 'http:/
       name: 'cURL / REST API',
       icon: '⬛',
       language: 'bash',
-      description: 'Make a direct HTTP GET request to check rate limits from any language or terminal.',
+      description: 'Make a direct HTTP GET request to check rate limits. Pass x-user-id header for per-user rate limiting.',
       code: `curl -X GET "${serverUrl}/api/check-limit?endpoint=/api/resource" \\
-  -H "x-api-key: ${apiKey}"`
+  -H "x-api-key: ${apiKey}" \\
+  -H "x-user-id: user_123"`
     },
     {
       id: 'node',
       name: 'Node.js / Express',
       icon: '🟩',
       language: 'javascript',
-      description: 'Express middleware function that checks limits before passing requests to handlers.',
+      description: 'Express HTTP middleware checking per-user rate limits.',
       code: `const axios = require('axios');
 
 function axionLimitMiddleware(req, res, next) {
+  const userId = req.user?.id || req.headers['x-user-id'] || req.ip;
+
   axios.get('${serverUrl}/api/check-limit', {
-    headers: { 'x-api-key': '${apiKey}' },
+    headers: {
+      'x-api-key': '${apiKey}',
+      'x-user-id': userId
+    },
     params: { endpoint: req.path },
     timeout: 3000
   }).then(response => {
@@ -34,7 +40,7 @@ function axionLimitMiddleware(req, res, next) {
     if (err.response?.status === 429) {
       return res.status(429).json({
         error: 'Too Many Requests',
-        message: 'Rate limit exceeded. Please slow down.',
+        message: 'Rate limit exceeded for this user. Please slow down.',
         retryAfter: err.response.data?.retryAfter || 1
       });
     }

@@ -100,7 +100,12 @@ export default function DocsPage() {
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '8px' }}><code style={{ color: 'var(--accent-light)' }}>x-api-key</code></td>
                   <td style={{ padding: '8px', color: 'var(--text-muted)' }}>String</td>
-                  <td style={{ padding: '8px' }}>Your project API Key generated from the AxionLimit dashboard.</td>
+                  <td style={{ padding: '8px' }}>Your project API Key generated from the AxionLimit dashboard. (Required)</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '8px' }}><code style={{ color: 'var(--accent-light)' }}>x-user-id</code></td>
+                  <td style={{ padding: '8px', color: 'var(--text-muted)' }}>String</td>
+                  <td style={{ padding: '8px' }}>Unique end-user identifier for per-user rate limiting (e.g. user ID, session ID, IP). (Optional)</td>
                 </tr>
               </tbody>
             </table>
@@ -119,6 +124,11 @@ export default function DocsPage() {
                   <td style={{ padding: '8px' }}><code style={{ color: 'var(--accent-light)' }}>endpoint</code></td>
                   <td style={{ padding: '8px', color: 'var(--text-muted)' }}>String</td>
                   <td style={{ padding: '8px' }}>Target endpoint path (e.g. <code style={{ color: 'var(--accent-light)' }}>/api/v1/users</code>). Used for telemetry analytics.</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '8px' }}><code style={{ color: 'var(--accent-light)' }}>userId</code></td>
+                  <td style={{ padding: '8px', color: 'var(--text-muted)' }}>String</td>
+                  <td style={{ padding: '8px' }}>Alternative query parameter to supply the end-user identifier for per-user rate limiting.</td>
                 </tr>
               </tbody>
             </table>

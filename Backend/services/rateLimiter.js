@@ -40,7 +40,7 @@ const registerRateLimitCommand = (redis) => {
   }
 };
 
-const isAllowed = async (identifier, limit, windowMs) => {
+const isAllowed = async (identifier, limit, windowMs, userId = null) => {
   const redis = getRedisClient(); //get the instance of redis first
 
   if (!redis || redis.status !== 'ready') {
@@ -53,7 +53,7 @@ const isAllowed = async (identifier, limit, windowMs) => {
 
     const now = Date.now();
     const member = `${now}:${crypto.randomBytes(8).toString('hex')}`;
-    const key = `rate_limit:${identifier}`; // here identifier is api_key creted by crypto lib and assigned to developer
+    const key = userId ? `rate_limit:${identifier}:${userId}` : `rate_limit:${identifier}`;
 
     const [allowedStatus, remaining, retryAfter] = await redis.checkRateLimit(key, limit, windowMs, now, member); //here we call the registered function
 
