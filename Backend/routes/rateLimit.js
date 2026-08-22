@@ -29,10 +29,15 @@ router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) =>
       req.body?.identifier ||
       null;
 
-    const rateLimitResult = await rateLimiter.isAllowed(apiKeyIdentifier, requestLimit, windowDurationMs, endUserId);
-
     const activeUserLabel = endUserId ? `${apiKeyName} (${endUserId})` : apiKeyName;
-    telemetry.logAnalytics(activeUserLabel, requestedEndpoint, rateLimitResult.allowed);
+    const rateLimitResult = await rateLimiter.isAllowed(
+      apiKeyIdentifier,
+      requestLimit,
+      windowDurationMs,
+      endUserId,
+      activeUserLabel,
+      requestedEndpoint
+    );
 
     res.setHeader('X-RateLimit-Limit', requestLimit);
     res.setHeader('X-RateLimit-Remaining', rateLimitResult.remaining);
