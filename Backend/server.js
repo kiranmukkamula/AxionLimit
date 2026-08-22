@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 require('dotenv').config();
 
 const { connectDB } = require('./config/db');
@@ -25,13 +24,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
 
 
-app.use(express.static(path.join(__dirname, 'public')));
 app.use('/auth', authRoutes);
 app.use('/api/keys', apiKeyRoutes);
 app.use('/api', rateLimitRoutes);
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+app.get('/', (req, res) => {
+  res.json({ success: true, service: 'AxionLimit Rate Limiting API', status: 'online' });
 });
 
 app.use((err, req, res, next) => {
