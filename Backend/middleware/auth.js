@@ -52,16 +52,33 @@ const verifyApiKey = async (req, res, next) => {
   ).trim();
   req.clientIp = clientIp;
 
+  const endUserId = (
+    req.headers['x-user-id'] ||
+    req.headers['x-client-user-id'] ||
+    req.headers['x-identifier'] ||
+    req.query?.userId ||
+    req.query?.user_id ||
+    req.query?.identifier ||
+    req.body?.userId ||
+    req.body?.user_id ||
+    req.body?.identifier ||
+    ''
+  ).trim();
+
   const redisClient = getRedisClient();
 
   if (redisClient && redisClient.status === 'ready') {
     try {
-      const isAutoBlacklisted = await redisClient.get(`blacklist:${clientIp}`);
-      if (isAutoBlacklisted) {
+      const isGlobalIpBlacklisted = await redisClient.get(`blacklist:${clientIp}`);
+      const isUserIpBlacklisted = endUserId ? await redisClient.get(`blacklist:${clientIp}:${endUserId}`) : null;
+
+      if (isGlobalIpBlacklisted || isUserIpBlacklisted) {
         return res.status(403).json({
           allowed: false,
           reason: 'IP_TEMPORARILY_BLOCKED',
-          message: 'Your IP address has been quarantined due to automated burst abuse. Please try again in 1 hour.'
+          message: isUserIpBlacklisted
+            ? `User account '${endUserId}' on IP ${clientIp} has been quarantined due to automated burst abuse. Please try again in 1 hour.`
+            : `Your IP address ${clientIp} has been quarantined due to automated burst abuse. Please try again in 1 hour.`
         });
       }
     } catch (err) {

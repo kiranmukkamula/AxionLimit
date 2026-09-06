@@ -9,6 +9,7 @@ local now = tonumber(ARGV[3])
 local member = ARGV[4]
 local activeIdentifier = ARGV[5]
 local activeEndpoint = ARGV[6]
+local ownerUserId = ARGV[7]
 
 local clearBefore = now - window
 redis.call('ZREMRANGEBYSCORE', key, 0, clearBefore)
@@ -32,18 +33,28 @@ else
     end
 end
 
--- Telemetry Logging in the same atomic call (0 extra network roundtrips)
-redis.call('INCR', 'telemetry:total_requests')
+-- Telemetry Logging scoped by key owner's User ID (Per-Developer Privacy)
+if not ownerUserId or ownerUserId == '' then
+    ownerUserId = 'global'
+end
+
+local tTotal = 'telemetry:' .. ownerUserId .. ':total_requests'
+local tAllowed = 'telemetry:' .. ownerUserId .. ':allowed_requests'
+local tBlocked = 'telemetry:' .. ownerUserId .. ':blocked_requests'
+local tTopUsers = 'telemetry:' .. ownerUserId .. ':top_users'
+local tTopEndpoints = 'telemetry:' .. ownerUserId .. ':top_endpoints'
+
+redis.call('INCR', tTotal)
 if allowed == 1 then
-    redis.call('INCR', 'telemetry:allowed_requests')
+    redis.call('INCR', tAllowed)
 else
-    redis.call('INCR', 'telemetry:blocked_requests')
+    redis.call('INCR', tBlocked)
 end
 if activeIdentifier and activeIdentifier ~= '' then
-    redis.call('ZINCRBY', 'telemetry:top_users', 1, activeIdentifier)
+    redis.call('ZINCRBY', tTopUsers, 1, activeIdentifier)
 end
 if activeEndpoint and activeEndpoint ~= '' then
-    redis.call('ZINCRBY', 'telemetry:top_endpoints', 1, activeEndpoint)
+    redis.call('ZINCRBY', tTopEndpoints, 1, activeEndpoint)
 end
 
 return {allowed, remaining, retryAfter}
@@ -61,7 +72,7 @@ const registerRateLimitCommand = (redis) => {
   }
 };
 
-const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserLabel = null, endpoint = null, clientIp = null) => {
+const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserLabel = null, endpoint = null, clientIp = null, ownerUserId = null) => {
   const redis = getRedisClient(); //get the instance of redis first
 
   if (!redis || redis.status !== 'ready') {
@@ -83,21 +94,24 @@ const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserL
       now,
       member,
       activeUserLabel || identifier || 'anonymous',
-      endpoint || '/api/default'
+      endpoint || '/api/default',
+      ownerUserId || 'global'
     );
 
     const isAllowedResult = allowedStatus === 1;
 
     if (!isAllowedResult && clientIp) {
       try {
-        const violationsKey = `violations:${clientIp}`;
+        const violationsKey = userId ? `violations:${clientIp}:${userId}` : `violations:${clientIp}`;
+        const blacklistKey = userId ? `blacklist:${clientIp}:${userId}` : `blacklist:${clientIp}`;
+
         const violationCount = await redis.incr(violationsKey);
         if (violationCount === 1) {
           await redis.expire(violationsKey, 60);
         }
         if (violationCount >= 20) {
-          await redis.set(`blacklist:${clientIp}`, 'AUTO_BLOCKED_BURST_ABUSE', 'EX', 3600);
-          console.warn(`🚨 [AxionLimit WAF] Auto-blacklisted IP: ${clientIp} for 1 hour due to 20+ rate limit violations in 60s.`);
+          await redis.set(blacklistKey, 'AUTO_BLOCKED_BURST_ABUSE', 'EX', 3600);
+          console.warn(`🚨 [AxionLimit WAF] Auto-blacklisted target: ${blacklistKey} for 1 hour due to 20+ rate limit violations in 60s.`);
         }
       } catch (abuseErr) {
         console.error('⚠️ Error tracking IP abuse violations:', abuseErr);

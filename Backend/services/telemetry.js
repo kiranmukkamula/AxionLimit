@@ -7,22 +7,23 @@ const { getRedisClient } = require('../config/db');
 // - telemetry:top_users          (sorted set: API-key name → request count)
 // - telemetry:top_endpoints      (sorted set: endpoint → request count)
 
-const getTelemetryKeys = () => {
+const getTelemetryKeys = (ownerUserId = 'global') => {
+  const prefix = `telemetry:${ownerUserId || 'global'}`;
   return {
-    total: 'telemetry:total_requests',
-    allowed: 'telemetry:allowed_requests',
-    blocked: 'telemetry:blocked_requests',
-    topUsers: 'telemetry:top_users',
-    topEndpoints: 'telemetry:top_endpoints'
+    total: `${prefix}:total_requests`,
+    allowed: `${prefix}:allowed_requests`,
+    blocked: `${prefix}:blocked_requests`,
+    topUsers: `${prefix}:top_users`,
+    topEndpoints: `${prefix}:top_endpoints`
   };
 };
 
-const logAnalytics = async (identifier, endpoint, allowed) => {
+const logAnalytics = async (identifier, endpoint, allowed, ownerUserId = 'global') => {
   const redis = getRedisClient();
 
   if (!redis || redis.status !== 'ready') return;
 
-  const keys = getTelemetryKeys();
+  const keys = getTelemetryKeys(ownerUserId);
 
   try {
     const pipeline = redis.pipeline();
@@ -47,7 +48,7 @@ const logAnalytics = async (identifier, endpoint, allowed) => {
   }
 };
 
-const getStats = async () => {
+const getStats = async (ownerUserId = 'global') => {
   const redis = getRedisClient();
 
   const emptyStats = {
@@ -62,15 +63,17 @@ const getStats = async () => {
     return emptyStats;
   }
 
+  const keys = getTelemetryKeys(ownerUserId);
+
   try {
     const [total, allowed, blocked] = await redis.mget(
-      'telemetry:total_requests',
-      'telemetry:allowed_requests',
-      'telemetry:blocked_requests'
+      keys.total,
+      keys.allowed,
+      keys.blocked
     );
 
-    const topUsersRaw = await redis.zrevrange('telemetry:top_users', 0, 9, 'WITHSCORES');
-    const topEndpointsRaw = await redis.zrevrange('telemetry:top_endpoints', 0, 9, 'WITHSCORES');
+    const topUsersRaw = await redis.zrevrange(keys.topUsers, 0, 9, 'WITHSCORES');
+    const topEndpointsRaw = await redis.zrevrange(keys.topEndpoints, 0, 9, 'WITHSCORES');
 
     const parseSortedSet = (rawList) => {
       const result = [];
@@ -96,17 +99,19 @@ const getStats = async () => {
   }
 };
 
-const resetStats = async () => {
+const resetStats = async (ownerUserId = 'global') => {
   const redis = getRedisClient();
   if (!redis || redis.status !== 'ready') return;
 
+  const keys = getTelemetryKeys(ownerUserId);
+
   try {
     await redis.del(
-      'telemetry:total_requests',
-      'telemetry:allowed_requests',
-      'telemetry:blocked_requests',
-      'telemetry:top_users',
-      'telemetry:top_endpoints'
+      keys.total,
+      keys.allowed,
+      keys.blocked,
+      keys.topUsers,
+      keys.topEndpoints
     );
   } catch (err) {
     console.error('❌ Error resetting telemetry stats:', err);

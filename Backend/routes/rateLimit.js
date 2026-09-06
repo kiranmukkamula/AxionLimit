@@ -7,7 +7,7 @@ const router = express.Router();
 
 router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) => {
   try {
-    const { keyHash: apiKeyIdentifier, limit: requestLimit, windowMs: windowDurationMs, name: apiKeyName } = req.apiKeyMetadata;
+    const { keyHash: apiKeyIdentifier, limit: requestLimit, windowMs: windowDurationMs, name: apiKeyName, userId: ownerUserId } = req.apiKeyMetadata;
     const subPath = req.path.replace(/^\/check-limit/, '');
     const requestedEndpoint =
       req.query.endpoint ||
@@ -37,7 +37,8 @@ router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) =>
       endUserId,
       activeUserLabel,
       requestedEndpoint,
-      req.clientIp
+      req.clientIp,
+      ownerUserId
     );
 
     res.setHeader('X-RateLimit-Limit', requestLimit);
@@ -70,7 +71,8 @@ router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) =>
 
 router.get('/analytics/stats', verifyJWT, async (req, res) => {
   try {
-    const stats = await telemetry.getStats();
+    const ownerUserId = req.user.userId;
+    const stats = await telemetry.getStats(ownerUserId);
     return res.status(200).json({
       success: true,
       stats
@@ -83,7 +85,8 @@ router.get('/analytics/stats', verifyJWT, async (req, res) => {
 
 router.post('/analytics/reset', verifyJWT, async (req, res) => {
   try {
-    await telemetry.resetStats();
+    const ownerUserId = req.user.userId;
+    await telemetry.resetStats(ownerUserId);
     return res.status(200).json({
       success: true,
       message: 'Telemetry counters and rankings reset successfully.'
