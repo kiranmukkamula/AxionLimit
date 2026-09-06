@@ -46,18 +46,26 @@ export default function SandboxPage() {
     } catch (err) {
       const data = err.response?.data || {};
       const status = err.response?.status || 429;
+      const reason = data.reason || (status === 403 ? 'IP_TEMPORARILY_BLOCKED' : 'RATE_LIMIT_EXCEEDED');
+      const message = data.message || (status === 403 ? 'Access denied for this IP.' : 'Too many requests. Please slow down.');
+
+      if (status === 403) {
+        toast(`🚨 ${message}`, 'error');
+        setAutoFire(false);
+      }
+
       setResult({
         allowed: false,
         remaining: 0,
         retryAfter: data.retryAfter || 1,
         status,
-        reason: data.reason,
-        message: data.message,
+        reason,
+        message,
         targetUserId: userId.trim(),
         targetIp: clientIp.trim()
       });
       setHistory(prev => [
-        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim(), targetIp: clientIp.trim(), reason: data.reason },
+        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim(), targetIp: clientIp.trim(), reason, status },
         ...prev.slice(0, 19)
       ]);
     } finally {
@@ -105,7 +113,7 @@ export default function SandboxPage() {
                   onChange={e => setSelectedKey(e.target.value)}
                 >
                   {keys.map(k => (
-                    <option key={k._id} value={k._id}>{k.name} — {k.keyIdentifier} ({k.rateLimit.limit}r/{k.rateLimit.windowMs/1000}s)</option>
+                    <option key={k._id} value={k._id}>{k.name} — {k.keyIdentifier} ({k.rateLimit.limit}r/{k.rateLimit.windowMs / 1000}s)</option>
                   ))}
                 </select>
               )}
@@ -235,10 +243,30 @@ export default function SandboxPage() {
               </div>
             ) : (
               <div className={`sandbox-result ${result.allowed ? 'allowed' : 'blocked'}`}>
-                <span className="sandbox-status-icon">{result.allowed ? '✅' : '🚫'}</span>
+                <span className="sandbox-status-icon">
+                  {result.allowed ? '✅' : result.status === 403 ? '🚨' : '🚫'}
+                </span>
                 <div className={`sandbox-status-text`} style={{ color: result.allowed ? 'var(--green)' : 'var(--red)' }}>
-                  {result.allowed ? 'Request Allowed' : 'Rate Limit Exceeded'}
+                  {result.allowed ? 'Request Allowed' : result.status === 403 ? 'IP Access Denied' : 'Rate Limit Exceeded'}
                 </div>
+
+                {result.message && !result.allowed && (
+                  <div style={{
+                    marginTop: 8,
+                    marginBottom: 12,
+                    padding: '8px 12px',
+                    borderRadius: 6,
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    color: 'var(--red)',
+                    fontSize: '0.8125rem',
+                    lineHeight: 1.4,
+                    textAlign: 'center'
+                  }}>
+                    {result.message}
+                  </div>
+                )}
+
                 <div className="sandbox-meta">
                   <div className="sandbox-meta-row">
                     <span className="sandbox-meta-key">Rate Limit Mode</span>
@@ -248,8 +276,18 @@ export default function SandboxPage() {
                   </div>
                   <div className="sandbox-meta-row">
                     <span className="sandbox-meta-key">HTTP Status</span>
-                    <span className="sandbox-meta-val">{result.allowed ? '200 OK' : '429 Too Many Requests'}</span>
+                    <span className="sandbox-meta-val" style={{ color: result.status === 403 ? 'var(--red)' : 'inherit' }}>
+                      {result.allowed ? '200 OK' : result.status === 403 ? '403 Forbidden' : '429 Too Many Requests'}
+                    </span>
                   </div>
+                  {result.reason && (
+                    <div className="sandbox-meta-row">
+                      <span className="sandbox-meta-key">Block Reason</span>
+                      <span className="sandbox-meta-val" style={{ color: 'var(--red)', fontWeight: 700 }}>
+                        {result.reason}
+                      </span>
+                    </div>
+                  )}
                   <div className="sandbox-meta-row">
                     <span className="sandbox-meta-key">Remaining Requests</span>
                     <span className="sandbox-meta-val" style={{ color: result.remaining === 0 ? 'var(--red)' : 'var(--green)' }}>
