@@ -9,6 +9,7 @@ export default function SandboxPage() {
   const [rawKey, setRawKey] = useState('');
   const [endpoint, setEndpoint] = useState('/api/v1/example');
   const [userId, setUserId] = useState('');
+  const [clientIp, setClientIp] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
@@ -35,18 +36,28 @@ export default function SandboxPage() {
     }
     setLoading(true);
     try {
-      const res = await checkRateLimit(keyToUse, endpoint, isKeyId, userId.trim());
+      const res = await checkRateLimit(keyToUse, endpoint, isKeyId, userId.trim(), clientIp.trim());
       const data = res.data;
-      setResult({ ...data, status: res.status, targetUserId: userId.trim() });
+      setResult({ ...data, status: res.status, targetUserId: userId.trim(), targetIp: clientIp.trim() });
       setHistory(prev => [
-        { allowed: data.allowed, remaining: data.remaining, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim() },
+        { allowed: data.allowed, remaining: data.remaining, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim(), targetIp: clientIp.trim() },
         ...prev.slice(0, 19)
       ]);
     } catch (err) {
       const data = err.response?.data || {};
-      setResult({ allowed: false, remaining: 0, retryAfter: data.retryAfter || 1, status: 429, targetUserId: userId.trim() });
+      const status = err.response?.status || 429;
+      setResult({
+        allowed: false,
+        remaining: 0,
+        retryAfter: data.retryAfter || 1,
+        status,
+        reason: data.reason,
+        message: data.message,
+        targetUserId: userId.trim(),
+        targetIp: clientIp.trim()
+      });
       setHistory(prev => [
-        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim() },
+        { allowed: false, remaining: 0, time: new Date().toLocaleTimeString(), endpoint, targetUserId: userId.trim(), targetIp: clientIp.trim(), reason: data.reason },
         ...prev.slice(0, 19)
       ]);
     } finally {
@@ -64,7 +75,7 @@ export default function SandboxPage() {
     } else {
       if (autoInterval) clearInterval(autoInterval);
     }
-  }, [autoFire, selectedKey, rawKey, endpoint]);
+  }, [autoFire, selectedKey, rawKey, endpoint, clientIp]);
 
   const selectedKeyObj = keys.find(k => k._id === selectedKey);
   const hasValidKey = Boolean(rawKey.trim() || selectedKey);
@@ -132,16 +143,29 @@ export default function SandboxPage() {
               />
             </div>
 
-            <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 14 }}>
               <label className="label">User ID / Identifier (Optional)</label>
               <input
                 className="input"
                 value={userId}
                 onChange={e => setUserId(e.target.value)}
-                placeholder="e.g. user_101 or 192.168.1.1 (Leave blank for global key limit)"
+                placeholder="e.g. user_101 (Leave blank for global key limit)"
               />
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
                 {userId.trim() ? `👤 Per-user rate limiting enabled for "${userId.trim()}"` : '🌐 Global rate limiting mode (all users share quota)'}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label className="label">Simulated Client IP (Optional, x-user-ip)</label>
+              <input
+                className="input"
+                value={clientIp}
+                onChange={e => setClientIp(e.target.value)}
+                placeholder="e.g. 192.168.1.50 or 203.0.113.5"
+              />
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                {clientIp.trim() ? `🛡️ Testing IP Access Control for "${clientIp.trim()}"` : '🌐 Default client IP detection'}
               </div>
             </div>
 

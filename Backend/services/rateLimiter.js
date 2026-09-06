@@ -61,7 +61,7 @@ const registerRateLimitCommand = (redis) => {
   }
 };
 
-const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserLabel = null, endpoint = null) => {
+const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserLabel = null, endpoint = null, clientIp = null) => {
   const redis = getRedisClient(); //get the instance of redis first
 
   if (!redis || redis.status !== 'ready') {
@@ -86,8 +86,26 @@ const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserL
       endpoint || '/api/default'
     );
 
+    const isAllowedResult = allowedStatus === 1;
+
+    if (!isAllowedResult && clientIp) {
+      try {
+        const violationsKey = `violations:${clientIp}`;
+        const violationCount = await redis.incr(violationsKey);
+        if (violationCount === 1) {
+          await redis.expire(violationsKey, 60);
+        }
+        if (violationCount >= 20) {
+          await redis.set(`blacklist:${clientIp}`, 'AUTO_BLOCKED_BURST_ABUSE', 'EX', 3600);
+          console.warn(`🚨 [AxionLimit WAF] Auto-blacklisted IP: ${clientIp} for 1 hour due to 20+ rate limit violations in 60s.`);
+        }
+      } catch (abuseErr) {
+        console.error('⚠️ Error tracking IP abuse violations:', abuseErr);
+      }
+    }
+
     return {
-      allowed: allowedStatus === 1,
+      allowed: isAllowedResult,
       remaining: parseInt(remaining, 10),
       retryAfter: parseInt(retryAfter, 10)
     };

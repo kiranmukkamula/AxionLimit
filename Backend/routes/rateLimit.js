@@ -36,7 +36,8 @@ router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) =>
       windowDurationMs,
       endUserId,
       activeUserLabel,
-      requestedEndpoint
+      requestedEndpoint,
+      req.clientIp
     );
 
     res.setHeader('X-RateLimit-Limit', requestLimit);

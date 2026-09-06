@@ -50,6 +50,14 @@ const ApiKeySchema = new mongoose.Schema({
       default: 60000
     }
   },
+  ipWhitelist: {
+    type: [String],
+    default: []
+  },
+  ipBlacklist: {
+    type: [String],
+    default: []
+  }
 }, { timestamps: true });
 
 // Hashes are needed internally for authentication but are never serialized.

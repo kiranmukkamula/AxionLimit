@@ -50,13 +50,90 @@ function Leaderboard({ title, items }) {
   );
 }
 
-function KeyItem({ k, onDelete, onRotate, onToggle, onViewSnippets }) {
+function IpRulesModal({ keyObj, onClose, onSave }) {
+  const toast = useToast();
+  const [whitelist, setWhitelist] = useState((keyObj.ipWhitelist || []).join(', '));
+  const [blacklist, setBlacklist] = useState((keyObj.ipBlacklist || []).join(', '));
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const ipWhitelist = whitelist.split(',').map(s => s.trim()).filter(Boolean);
+      const ipBlacklist = blacklist.split(',').map(s => s.trim()).filter(Boolean);
+      await updateApiKey(keyObj._id, { ipWhitelist, ipBlacklist });
+      toast('IP Access Rules updated successfully!', 'success');
+      onSave();
+      onClose();
+    } catch (err) {
+      toast(err.response?.data?.error || 'Failed to update IP rules.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 9999, padding: 16
+    }}>
+      <div className="card" style={{ maxWidth: 520, width: '100%' }}>
+        <div className="panel-title flex items-center justify-between" style={{ marginBottom: 16 }}>
+          <span>🛡️ IP Access Rules — {keyObj.name}</span>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label className="label">Allowed IPs (Whitelist)</label>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+            Comma-separated IPs. If set, <b>ONLY</b> these IPs can use this key. Leave empty for all IPs.
+          </p>
+          <input
+            className="input"
+            placeholder="e.g. 192.168.1.100, 10.0.0.1"
+            value={whitelist}
+            onChange={e => setWhitelist(e.target.value)}
+          />
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label className="label">Blocked IPs (Blacklist)</label>
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+            Comma-separated IPs to block immediately (403 Forbidden).
+          </p>
+          <input
+            className="input"
+            placeholder="e.g. 203.0.113.5, 45.33.21.10"
+            value={blacklist}
+            onChange={e => setBlacklist(e.target.value)}
+          />
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving...' : 'Save IP Rules'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KeyItem({ k, onDelete, onRotate, onToggle, onViewSnippets, onEditIpRules }) {
+  const wlCount = k.ipWhitelist?.length || 0;
+  const blCount = k.ipBlacklist?.length || 0;
+
   return (
     <div className="key-item">
       <div className="key-meta">
         <div className="key-name">{k.name}</div>
         <div className="key-string-row">
           <span className="key-string">{k.keyIdentifier}</span>
+          {wlCount > 0 && <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>🔒 {wlCount} Allowed IPs</span>}
+          {blCount > 0 && <span className="badge badge-red" style={{ fontSize: '0.7rem' }}>🚫 {blCount} Blocked IPs</span>}
         </div>
       </div>
       <div className="key-actions">
@@ -64,6 +141,9 @@ function KeyItem({ k, onDelete, onRotate, onToggle, onViewSnippets }) {
           {k.rateLimit.limit}r / {k.rateLimit.windowMs / 1000}s
         </span>
         <span className={`badge ${k.isActive ? 'badge-green' : 'badge-red'}`}>{k.isActive ? 'Active' : 'Disabled'}</span>
+        <button className="btn btn-xs btn-ghost" onClick={() => onEditIpRules(k)} title="IP Whitelist & Blacklist Rules" style={{ fontSize: '0.75rem' }}>
+          🛡️ IP Rules
+        </button>
         <button className="btn btn-xs btn-ghost" onClick={() => onViewSnippets(k.keyIdentifier)} title="View Code Snippets" style={{ fontSize: '0.75rem' }}>
           &lt;/&gt; Code
         </button>
@@ -159,6 +239,7 @@ export default function DashboardPage() {
   const [keysLoading, setKeysLoading] = useState(true);
   const [oneTimeKey, setOneTimeKey] = useState('');
   const [snippetModalKey, setSnippetModalKey] = useState(null);
+  const [ipModalKey, setIpModalKey] = useState(null);
 
   const gridColor = theme === 'dark' ? '#222' : '#E5E7EB';
   const textColor = theme === 'dark' ? '#888' : '#9CA3AF';
@@ -336,6 +417,7 @@ export default function DashboardPage() {
                   onRotate={handleRotate}
                   onToggle={handleToggle}
                   onViewSnippets={(keyId) => setSnippetModalKey(keyId)}
+                  onEditIpRules={(keyObj) => setIpModalKey(keyObj)}
                 />
               ))}
             </div>
@@ -344,6 +426,15 @@ export default function DashboardPage() {
 
         <Leaderboard title="👤 Top API Key Users" items={stats.topUsers} />
       </div>
+
+      {/* IP Rules Modal */}
+      {ipModalKey && (
+        <IpRulesModal
+          keyObj={ipModalKey}
+          onClose={() => setIpModalKey(null)}
+          onSave={() => loadKeys()}
+        />
+      )}
 
       {/* Code Snippets Modal */}
       {snippetModalKey && (

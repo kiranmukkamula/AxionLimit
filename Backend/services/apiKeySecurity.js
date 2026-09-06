@@ -34,6 +34,8 @@ function publicApiKey(apiKey) {
     expiresAt: source.expiresAt || null,
     keyIdentifier: maskedKeyIdentifier(source.keyPrefix),
     rateLimit: source.rateLimit,
+    ipWhitelist: source.ipWhitelist || [],
+    ipBlacklist: source.ipBlacklist || [],
     createdAt: source.createdAt,
     updatedAt: source.updatedAt
   };

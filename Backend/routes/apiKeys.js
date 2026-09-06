@@ -44,6 +44,14 @@ function validateKeyInput(body, { partial = false } = {}) {
     if (typeof body.isActive !== 'boolean') return { error: 'isActive must be true or false.' };
     updates.isActive = body.isActive;
   }
+  if (body.ipWhitelist !== undefined) {
+    if (!Array.isArray(body.ipWhitelist)) return { error: 'ipWhitelist must be an array of strings.' };
+    updates.ipWhitelist = body.ipWhitelist.map(ip => String(ip).trim()).filter(Boolean);
+  }
+  if (body.ipBlacklist !== undefined) {
+    if (!Array.isArray(body.ipBlacklist)) return { error: 'ipBlacklist must be an array of strings.' };
+    updates.ipBlacklist = body.ipBlacklist.map(ip => String(ip).trim()).filter(Boolean);
+  }
   return { updates };
 }
 
@@ -80,9 +88,18 @@ router.post('/', async (req, res) => {
       return res.status(429).json({ error: 'Daily API key generation quota (max 3 keys/day) has been exceeded.' });
     }
     const generated = generateApiKey();
-    const key = await ApiKey.create({ userId, keyHash: generated.keyHash, keyPrefix: generated.keyPrefix, name: input.updates.name,
-      label: input.updates.label || '', environment: input.updates.environment || 'dev', expiresAt: input.updates.expiresAt || null,
-      rateLimit: { limit: input.updates['rateLimit.limit'] || 100, windowMs: input.updates['rateLimit.windowMs'] || 60000 } });
+    const key = await ApiKey.create({
+      userId,
+      keyHash: generated.keyHash,
+      keyPrefix: generated.keyPrefix,
+      name: input.updates.name,
+      label: input.updates.label || '',
+      environment: input.updates.environment || 'dev',
+      expiresAt: input.updates.expiresAt || null,
+      rateLimit: { limit: input.updates['rateLimit.limit'] || 100, windowMs: input.updates['rateLimit.windowMs'] || 60000 },
+      ipWhitelist: input.updates.ipWhitelist || [],
+      ipBlacklist: input.updates.ipBlacklist || []
+    });
     return res.status(201).json({ success: true, message: 'Copy this API key now; it will not be shown again.', rawKey: generated.rawKey, key: publicApiKey(key) });
   } catch (err) {
     if (quotaIncremented && redis && redis.status === 'ready') await redis.decr(quotaKey).catch(() => {});

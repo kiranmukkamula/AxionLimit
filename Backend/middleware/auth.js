@@ -24,6 +24,17 @@ const verifyJWT = (req, res, next) => {
   }
 };
 
+const enforceIpRules = (metadata, clientIp) => {
+  const { ipWhitelist = [], ipBlacklist = [] } = metadata;
+  if (ipBlacklist.length > 0 && ipBlacklist.includes(clientIp)) {
+    return { allowed: false, reason: 'IP_BLACK_LISTED', message: `Access denied. IP ${clientIp} is blacklisted.` };
+  }
+  if (ipWhitelist.length > 0 && !ipWhitelist.includes(clientIp)) {
+    return { allowed: false, reason: 'IP_NOT_WHITELISTED', message: `Access denied. IP ${clientIp} is not in the allowed IP whitelist.` };
+  }
+  return { allowed: true };
+};
+
 const verifyApiKey = async (req, res, next) => {
   const suppliedApiKey = req.headers['x-api-key'];
   const suppliedKeyId = req.headers['x-api-key-id'];
@@ -32,7 +43,31 @@ const verifyApiKey = async (req, res, next) => {
     return res.status(401).json({ error: 'API key or Key ID is missing.' });
   }
 
+  const clientIp = (
+    req.headers['x-user-ip'] ||
+    req.headers['x-client-ip'] ||
+    req.headers['x-forwarded-for']?.split(',')[0] ||
+    req.socket?.remoteAddress ||
+    '127.0.0.1'
+  ).trim();
+  req.clientIp = clientIp;
+
   const redisClient = getRedisClient();
+
+  if (redisClient && redisClient.status === 'ready') {
+    try {
+      const isAutoBlacklisted = await redisClient.get(`blacklist:${clientIp}`);
+      if (isAutoBlacklisted) {
+        return res.status(403).json({
+          allowed: false,
+          reason: 'IP_TEMPORARILY_BLOCKED',
+          message: 'Your IP address has been quarantined due to automated burst abuse. Please try again in 1 hour.'
+        });
+      }
+    } catch (err) {
+      console.error('⚠️ Redis blacklist check error:', err);
+    }
+  }
 
   // If Key ID was provided
   if (suppliedKeyId) {
@@ -57,6 +92,10 @@ const verifyApiKey = async (req, res, next) => {
         if (cached) {
           const metadata = JSON.parse(cached);
           if (metadata.isActive && !isExpired(metadata.expiresAt)) {
+            const ipCheck = enforceIpRules(metadata, clientIp);
+            if (!ipCheck.allowed) {
+              return res.status(403).json(ipCheck);
+            }
             req.apiKeyMetadata = metadata;
             return next();
           }
@@ -82,6 +121,8 @@ const verifyApiKey = async (req, res, next) => {
         name: apiKeyDocument.name,
         limit: apiKeyDocument.rateLimit.limit,
         windowMs: apiKeyDocument.rateLimit.windowMs,
+        ipWhitelist: apiKeyDocument.ipWhitelist || [],
+        ipBlacklist: apiKeyDocument.ipBlacklist || [],
         isActive: apiKeyDocument.isActive,
         expiresAt: apiKeyDocument.expiresAt || null
       };
@@ -92,6 +133,11 @@ const verifyApiKey = async (req, res, next) => {
         } catch (cacheErr) {
           console.error('⚠️ Failed to write API key ID cache to Redis:', cacheErr);
         }
+      }
+
+      const ipCheck = enforceIpRules(apiKeyMetadata, clientIp);
+      if (!ipCheck.allowed) {
+        return res.status(403).json(ipCheck);
       }
 
       req.apiKeyMetadata = apiKeyMetadata;
@@ -112,6 +158,10 @@ const verifyApiKey = async (req, res, next) => {
       if (cachedApiKeyMetadata) {
         const metadata = JSON.parse(cachedApiKeyMetadata);
         if (metadata.isActive && !isExpired(metadata.expiresAt)) {
+          const ipCheck = enforceIpRules(metadata, clientIp);
+          if (!ipCheck.allowed) {
+            return res.status(403).json(ipCheck);
+          }
           req.apiKeyMetadata = metadata;
           return next();
         }
@@ -135,6 +185,8 @@ const verifyApiKey = async (req, res, next) => {
       name: apiKeyDocument.name,
       limit: apiKeyDocument.rateLimit.limit,
       windowMs: apiKeyDocument.rateLimit.windowMs,
+      ipWhitelist: apiKeyDocument.ipWhitelist || [],
+      ipBlacklist: apiKeyDocument.ipBlacklist || [],
       isActive: apiKeyDocument.isActive,
       expiresAt: apiKeyDocument.expiresAt || null
     };
@@ -145,6 +197,11 @@ const verifyApiKey = async (req, res, next) => {
       } catch (cacheErr) {
         console.error('⚠️ Failed to write API key cache to Redis:', cacheErr);
       }
+    }
+
+    const ipCheck = enforceIpRules(apiKeyMetadata, clientIp);
+    if (!ipCheck.allowed) {
+      return res.status(403).json(ipCheck);
     }
 
     req.apiKeyMetadata = apiKeyMetadata;
