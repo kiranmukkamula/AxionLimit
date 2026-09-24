@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com',
 });
 
 

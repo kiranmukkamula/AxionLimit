@@ -460,7 +460,7 @@ export default function DashboardPage() {
               <span>🛠 Integration Snippets</span>
               <button className="btn btn-ghost btn-sm" onClick={() => setSnippetModalKey(null)}>✕ Close</button>
             </div>
-            <IntegrationSnippets apiKey={snippetModalKey} serverUrl="http://localhost:5000" compact={true} />
+            <IntegrationSnippets apiKey={snippetModalKey} compact={true} />
           </div>
         </div>
       )}

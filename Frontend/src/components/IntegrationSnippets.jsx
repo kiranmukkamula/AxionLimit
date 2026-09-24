@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { useToast } from './Toast';
 
-export function getLanguageSnippets(apiKey = 'YOUR_API_KEY', serverUrl = 'http://localhost:5000') {
+const DEFAULT_SERVER_URL = import.meta.env.VITE_API_BASE_URL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com';
+
+export function getLanguageSnippets(apiKey = 'YOUR_API_KEY', serverUrl = DEFAULT_SERVER_URL) {
   return [
     {
       id: 'curl',
@@ -250,7 +252,7 @@ public class AxionLimitFilter extends OncePerRequestFilter {
   ];
 }
 
-export default function IntegrationSnippets({ apiKey = 'YOUR_API_KEY', serverUrl = 'http://localhost:5000', compact = false }) {
+export default function IntegrationSnippets({ apiKey = 'YOUR_API_KEY', serverUrl = DEFAULT_SERVER_URL, compact = false }) {
   const snippets = getLanguageSnippets(apiKey, serverUrl);
   const [activeTab, setActiveTab] = useState(snippets[0].id);
   const toast = useToast();

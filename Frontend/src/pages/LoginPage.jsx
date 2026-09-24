@@ -18,6 +18,8 @@ export default function LoginPage() {
     }
   }, [user, navigate]);
 
+  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com';
+
   const handleDevLogin = async () => {
     setLoading(true);
     try {
@@ -25,14 +27,14 @@ export default function LoginPage() {
       login(res.data.token, res.data.user);
       navigate('/dashboard');
     } catch (err) {
-      toast('Developer login failed. Is the backend running on port 5000?', 'error');
+      toast('Developer login failed. Check backend connectivity.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = 'http://localhost:5000/auth/google';
+    window.location.href = `${backendUrl}/auth/google`;
   };
 
   return (

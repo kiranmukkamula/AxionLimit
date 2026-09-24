@@ -13,13 +13,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Trust reverse proxy (AWS Application Load Balancer) for accurate client IP detection
-app.set('trust proxy', 1);
+app.set('trust proxy server', 1);
 
 connectDB();
 
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5000',
+  'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
@@ -77,7 +78,10 @@ app.get('/', (req, res) => {
     server: process.env.EC2_SERVER_NAME || 'EC2-Local',
     status: 'online'
   });
+
+
 });
+
 
 app.use((err, req, res, next) => {
   console.error('💥 Uncaught server error:', err);
