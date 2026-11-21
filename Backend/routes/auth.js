@@ -20,7 +20,6 @@ const generateToken = (user) => {
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
 router.get('/google/callback', passport.authenticate('google', { failureRedirect: '/?error=oauth_failed', session: false }),
-
   (req, res) => {
     try {
       const token = generateToken(req.user);
@@ -33,6 +32,13 @@ router.get('/google/callback', passport.authenticate('google', { failureRedirect
 );
 
 router.post('/dev-login', async (req, res) => {
+  // In production environments, dev-login is disabled by default unless explicitly enabled
+  if (process.env.NODE_ENV === 'production' && process.env.ENABLE_DEV_LOGIN !== 'true') {
+    return res.status(403).json({
+      error: 'Developer mock login is disabled in production mode. Set ENABLE_DEV_LOGIN=true to enable for testing.'
+    });
+  }
+
   try {
     const devGoogleId = 'mock_dev_google_id_99999';
     let user = await User.findOne({ googleId: devGoogleId });

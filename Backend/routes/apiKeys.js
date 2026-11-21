@@ -6,6 +6,7 @@ const { generateApiKey, publicApiKey } = require('../services/apiKeySecurity');
 
 const router = express.Router();
 const ENVIRONMENTS = new Set(['dev', 'staging', 'prod']);
+const MAX_ALLOWED_LIMIT = 50000;
 router.use(verifyJWT);
 
 function validateKeyInput(body, { partial = false } = {}) {
@@ -25,6 +26,9 @@ function validateKeyInput(body, { partial = false } = {}) {
   if (body.limit !== undefined) {
     const value = Number.parseInt(body.limit, 10);
     if (!Number.isInteger(value) || value < 1) return { error: 'Limit must be a positive integer.' };
+    if (value > MAX_ALLOWED_LIMIT) {
+      return { error: `Request limit cannot exceed ${MAX_ALLOWED_LIMIT.toLocaleString()} requests per window.` };
+    }
     updates['rateLimit.limit'] = value;
   }
   if (body.windowMs !== undefined) {
@@ -77,16 +81,19 @@ router.post('/', async (req, res) => {
   try {
     let count;
     if (redis && redis.status === 'ready') {
-      count = await redis.incr(quotaKey); quotaIncremented = true;
+      count = await redis.incr(quotaKey); 
+      quotaIncremented = true;
       if (count === 1) await redis.expire(quotaKey, Math.max(1, Math.ceil((new Date().setUTCHours(23, 59, 59, 999) - Date.now()) / 1000)));
     } else {
       const start = new Date(); start.setHours(0, 0, 0, 0);
       count = await ApiKey.countDocuments({ userId, createdAt: { $gte: start } });
     }
+
     if (count > 3) {
       if (quotaIncremented) await redis.decr(quotaKey);
       return res.status(429).json({ error: 'Daily API key generation quota (max 3 keys/day) has been exceeded.' });
     }
+    
     const generated = generateApiKey();
     const key = await ApiKey.create({
       userId,

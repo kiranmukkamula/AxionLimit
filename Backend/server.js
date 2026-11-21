@@ -13,12 +13,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Trust reverse proxy (AWS Application Load Balancer) for accurate client IP detection
-app.set('trust proxy server', 1);
+app.set('trust proxy', 1);
 
 connectDB();
 
 const allowedOrigins = [
   'http://localhost:3000',
+  'http://localhost:5173',
   'http://localhost:5000',
   'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com',
   process.env.FRONTEND_URL
@@ -26,8 +27,8 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow non-browser clients (curl/Postman) or listed origins
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(o => origin.startsWith(o))) {
+    // Allow non-browser clients (curl/Postman), listed origins, or S3 static website hosts
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(o => origin.startsWith(o)) || origin.includes('.s3-website.')) {
       callback(null, true);
     } else {
       callback(null, true); // Permissive fallback for testing/ALB health checks
@@ -67,6 +68,8 @@ app.get('/server-info', (req, res) => {
   });
 });
 
+
+//3 mini routers initilzation
 app.use('/auth', authRoutes);
 app.use('/api/keys', apiKeyRoutes);
 app.use('/api', rateLimitRoutes);
@@ -78,8 +81,6 @@ app.get('/', (req, res) => {
     server: process.env.EC2_SERVER_NAME || 'EC2-Local',
     status: 'online'
   });
-
-
 });
 
 
@@ -94,5 +95,38 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`🚀 AxionLimit rate limiter server running on port ${PORT} [Node: ${process.env.EC2_SERVER_NAME || 'Local'}]`);
 });
+
+// Graceful Shutdown Handler
+const shutdown = (signal) => {
+  console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
+  server.close(async () => {
+    console.log('HTTP server closed. Terminating active database connections...');
+    try {
+      if (mongoose.connection.readyState === 1) {
+        await mongoose.connection.close();
+        console.log('MongoDB connection closed.');
+      }
+      const redisClient = getRedisClient();
+      if (redisClient && redisClient.status === 'ready') {
+        await redisClient.quit();
+        console.log('Redis connection closed.');
+      }
+      console.log('✅ Graceful shutdown completed cleanly.');
+      process.exit(0);
+    } catch (err) {
+      console.error('Error during shutdown:', err);
+      process.exit(1);
+    }
+  });
+
+  // Force exit after 10-second safety timeout
+  setTimeout(() => {
+    console.error('⚠️ Forcefully terminating process after 10s shutdown timeout.');
+    process.exit(1);
+  }, 10000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = server;

@@ -17,7 +17,7 @@ passport.use(
     {
       clientID: clientID || 'dummy-client-id.apps.googleusercontent.com',
       clientSecret: clientSecret || 'dummy-client-secret',
-      callbackURL: callbackURL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com/auth/google/callback',
+      callbackURL: callbackURL || 'http://localhost:5000/auth/google/callback',
       passReqToCallback: true
     },
     async (req, accessToken, refreshToken, profile, done) => {

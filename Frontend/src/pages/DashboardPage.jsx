@@ -163,10 +163,22 @@ function CreateKeyForm({ onCreated }) {
   const [windowMs, setWindowMs] = useState(60000);
   const [loading, setLoading] = useState(false);
 
+  const MAX_LIMIT = 50000;
+  const isLimitExceeded = Number(limit) > MAX_LIMIT;
+
   const handleCreate = async () => {
+    const parsedLimit = parseInt(limit, 10);
+    if (!parsedLimit || parsedLimit < 1) {
+      toast('Request limit must be at least 1.', 'error');
+      return;
+    }
+    if (parsedLimit > MAX_LIMIT) {
+      toast(`Request limit cannot exceed ${MAX_LIMIT.toLocaleString()} requests per window.`, 'error');
+      return;
+    }
     setLoading(true);
     try {
-      const res = await createApiKey({ name, limit: parseInt(limit), windowMs: parseInt(windowMs) });
+      const res = await createApiKey({ name, limit: parsedLimit, windowMs: parseInt(windowMs, 10) });
       onCreated(res.data.rawKey);
       toast('API Key created — copy it from the one-time display.', 'success');
       setName(''); setLimit(100); setWindowMs(60000); setOpen(false);
@@ -191,8 +203,26 @@ function CreateKeyForm({ onCreated }) {
           </div>
           <div className="form-row">
             <div>
-              <label className="label">Request Limit</label>
-              <input className="input" type="number" min={1} value={limit} onChange={e => setLimit(e.target.value)} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label className="label" style={{ marginBottom: 4 }}>Request Limit</label>
+                <span style={{ fontSize: '0.72rem', color: isLimitExceeded ? '#ef4444' : 'var(--text-muted)' }}>
+                  Max: {MAX_LIMIT.toLocaleString()}
+                </span>
+              </div>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={MAX_LIMIT}
+                value={limit}
+                onChange={e => setLimit(e.target.value)}
+                style={isLimitExceeded ? { borderColor: '#ef4444', background: 'rgba(239, 68, 68, 0.08)' } : {}}
+              />
+              {isLimitExceeded && (
+                <div style={{ color: '#ef4444', fontSize: '0.72rem', marginTop: 4 }}>
+                  ⚠️ Limit exceeds maximum allowed ({MAX_LIMIT.toLocaleString()} req/window).
+                </div>
+              )}
             </div>
             <div>
               <label className="label">Window (ms)</label>
@@ -200,7 +230,7 @@ function CreateKeyForm({ onCreated }) {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={loading || !name}>
+            <button className="btn btn-primary btn-sm" onClick={handleCreate} disabled={loading || !name || isLimitExceeded || Number(limit) < 1}>
               {loading ? 'Creating...' : 'Create Key'}
             </button>
             <button className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancel</button>

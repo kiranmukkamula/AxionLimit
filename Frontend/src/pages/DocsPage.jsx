@@ -84,7 +84,7 @@ export default function DocsPage() {
           <div style={{ marginTop: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
               <span className="badge badge-accent" style={{ fontWeight: 700 }}>GET / POST</span>
-              <code style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{(import.meta.env.VITE_API_BASE_URL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com') + '/api/check-limit'}</code>
+              <code style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{(import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000') + '/api/check-limit'}</code>
             </div>
 
             <div style={{ fontSize: '0.875rem', fontWeight: 600, margin: '14px 0 6px', color: 'var(--text-main)' }}>Headers</div>

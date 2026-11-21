@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AxionLimit Terraform Configuration Variables (Example)
+# Copy this file to terraform.tfvars and customize for your deployment.
+# NEVER commit terraform.tfvars to version control!
+# ─────────────────────────────────────────────────────────────────────────────
+
+# AWS Region: Mumbai (ap-south-1) is recommended for lowest latency in India
+aws_region = "ap-south-1"
+
+# Environment tag
+environment = "dev"
+
+# Project identifier prefix
+project_name = "axionlimit"
+
+# EC2 Instance Type: t3.small (2 vCPU, 2GB RAM) is optimal for Docker + Redis + Node.js
+instance_type = "t3.small"
+
+# Elastic IP allocation:
+# - false (Recommended for low cost): Releases public IP on stop ($0.00 IP cost when stopped).
+# - true: Allocates permanent static IP ($3.65/month even when EC2 is stopped).
+use_elastic_ip = false
+
+# SSH Port 22 Access:
+# - false (Recommended): Remote access is handled by AWS Systems Manager (SSM) without open ports.
+# - true: Opens port 22 restricted strictly to admin_ip.
+enable_ssh = false
+
+# Admin IP for SSH access (e.g. your home public IP: "203.0.113.50/32").
+# Only used when enable_ssh is true. NEVER leave as 0.0.0.0/0 in production.
+admin_ip = "0.0.0.0/0"
+
+# Prefix for S3 bucket hosting frontend static files
+s3_bucket_prefix = "axionlimit-frontend"
+
+# Optional GitHub repository for OIDC CI/CD deployment (e.g. "username/AxionLimit")
+# Leave empty if not using automated GitHub Actions CI/CD yet.
+github_repo = ""

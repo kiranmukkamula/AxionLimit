@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../components/Toast';
-import { devLogin } from '../api/client';
+import { devLogin, getApiBaseUrl } from '../api/client';
 
 export default function LoginPage() {
   const { user, login } = useAuth();
@@ -18,8 +18,6 @@ export default function LoginPage() {
     }
   }, [user, navigate]);
 
-  const backendUrl = import.meta.env.VITE_API_BASE_URL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com';
-
   const handleDevLogin = async () => {
     setLoading(true);
     try {
@@ -27,14 +25,14 @@ export default function LoginPage() {
       login(res.data.token, res.data.user);
       navigate('/dashboard');
     } catch (err) {
-      toast('Developer login failed. Check backend connectivity.', 'error');
+      toast(err.response?.data?.error || 'Developer login failed. Check backend connectivity.', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = `${backendUrl}/auth/google`;
+    window.location.href = `${getApiBaseUrl()}/auth/google`;
   };
 
   return (

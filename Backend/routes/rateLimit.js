@@ -58,7 +58,8 @@ router.all(['/check-limit', '/check-limit/*'], verifyApiKey, async (req, res) =>
         retryAfter: rateLimitResult.retryAfter
       });
     }
-  } catch (rateLimitRequestError) {
+  } catch (rateLimitRequestError) 
+  {
     console.error('❌ Error checking rate limit:', rateLimitRequestError);
     return res.status(200).json({
       allowed: true,

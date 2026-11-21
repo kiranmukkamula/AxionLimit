@@ -42,3 +42,16 @@ desktop.ini
 # ─── Misc ────────────────────────────────────────────────
 coverage/
 .cache/
+
+# ─── Terraform State & Secrets ────────────────────────────
+infrastructure/.terraform/
+infrastructure/.terraform.lock.hcl
+infrastructure/terraform.tfstate
+infrastructure/terraform.tfstate.*
+infrastructure/terraform.tfvars
+infrastructure/*.tfplan
+
+# ─── Script Credentials (Never commit) ─────────────────────
+scripts/.atlas.env
+scripts/.env.scripts
+

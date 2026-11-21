@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useToast } from './Toast';
 
-const DEFAULT_SERVER_URL = import.meta.env.VITE_API_BASE_URL || 'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com';
+const DEFAULT_SERVER_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
 export function getLanguageSnippets(apiKey = 'YOUR_API_KEY', serverUrl = DEFAULT_SERVER_URL) {
   return [

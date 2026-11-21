@@ -48,3 +48,20 @@ test('model serialization and public key responses never expose raw keys or hash
   assert.equal(JSON.stringify(publicKey).includes(generated.rawKey), false);
   assert.equal(JSON.stringify(publicKey).includes(generated.keyHash), false);
 });
+
+test('rateLimit limit rejects values exceeding 50000 in schema validation', () => {
+  const generated = generateApiKey();
+  const validKey = new ApiKey({
+    userId: '507f1f77bcf86cd799439011', keyHash: generated.keyHash, keyPrefix: generated.keyPrefix,
+    name: 'test', rateLimit: { limit: 50000, windowMs: 1000 }
+  });
+  assert.equal(validKey.validateSync(), undefined);
+
+  const invalidKey = new ApiKey({
+    userId: '507f1f77bcf86cd799439011', keyHash: generated.keyHash, keyPrefix: generated.keyPrefix,
+    name: 'test', rateLimit: { limit: 50001, windowMs: 1000 }
+  });
+  const err = invalidKey.validateSync();
+  assert.ok(err);
+  assert.match(err.errors['rateLimit.limit'].message, /cannot exceed 50,000/);
+});

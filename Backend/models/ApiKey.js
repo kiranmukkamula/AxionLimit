@@ -43,7 +43,9 @@ const ApiKeySchema = new mongoose.Schema({
   rateLimit: {
     limit: {
       type: Number,
-      default: 100
+      default: 100,
+      min: [1, 'Limit must be at least 1'],
+      max: [50000, 'Limit cannot exceed 50,000']
     },
     windowMs: {
       type: Number,

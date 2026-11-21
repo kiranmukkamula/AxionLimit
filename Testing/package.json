@@ -1,0 +1,18 @@
+{
+  "name": "axionlimit-testing",
+  "version": "1.0.0",
+  "description": "Continuous request simulation and rate limit testing harness for AxionLimit",
+  "main": "test-rate-limit.js",
+  "scripts": {
+    "start": "node test-rate-limit.js",
+    "test:constant": "node test-rate-limit.js --mode constant",
+    "test:burst": "node test-rate-limit.js --mode burst"
+  },
+  "keywords": [
+    "rate-limiting",
+    "load-testing",
+    "axionlimit"
+  ],
+  "author": "",
+  "license": "ISC"
+}
