@@ -46,6 +46,7 @@ const verifyApiKey = async (req, res, next) => {
   const clientIp = (
     req.headers['x-user-ip'] ||
     req.headers['x-client-ip'] ||
+    req.ip ||
     req.headers['x-forwarded-for']?.split(',')[0] ||
     req.socket?.remoteAddress ||
     '127.0.0.1'

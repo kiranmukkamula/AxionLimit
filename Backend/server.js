@@ -12,7 +12,7 @@ const rateLimitRoutes = require('./routes/rateLimit');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Trust reverse proxy (AWS Application Load Balancer) for accurate client IP detection
+// Trust reverse proxy (Nginx container) for accurate client IP detection via req.ip
 app.set('trust proxy', 1);
 
 connectDB();
