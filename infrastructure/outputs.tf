@@ -1,5 +1,5 @@
 output "ec2_instance_id" {
-  description = "The EC2 Instance ID used by axion-start.ps1 and axion-stop.ps1"
+  description = "The EC2 Instance ID used for management and SSM deployment"
   value       = aws_instance.server.id
 }
 
@@ -8,19 +8,9 @@ output "ec2_public_ip" {
   value       = var.use_elastic_ip ? aws_eip.ec2_eip[0].public_ip : aws_instance.server.public_ip
 }
 
-output "backend_api_url" {
-  description = "The HTTP REST API URL for AxionLimit Backend"
-  value       = "http://${var.use_elastic_ip ? aws_eip.ec2_eip[0].public_ip : aws_instance.server.public_ip}:5000"
-}
-
-output "s3_website_endpoint" {
-  description = "The public HTTP website endpoint for the React Frontend hosted on S3"
-  value       = "http://${aws_s3_bucket_website_configuration.frontend_website.website_endpoint}"
-}
-
-output "s3_bucket_name" {
-  description = "The name of the S3 bucket hosting frontend static assets"
-  value       = aws_s3_bucket.frontend.id
+output "app_url" {
+  description = "The public HTTP URL for AxionLimit web dashboard and API (Port 80 via Nginx)"
+  value       = "http://${var.use_elastic_ip ? aws_eip.ec2_eip[0].public_ip : aws_instance.server.public_ip}"
 }
 
 output "github_actions_role_arn" {

@@ -30,7 +30,7 @@ variable "public_subnet_cidr" {
 
 variable "instance_type" {
   type        = string
-  description = "EC2 instance type for backend & Redis. t3.small provides 2 vCPU and 2GB RAM."
+  description = "EC2 instance type for Nginx, Backend & Redis. t3.small provides 2 vCPU and 2GB RAM."
   default     = "t3.small"
 }
 
@@ -50,12 +50,6 @@ variable "admin_ip" {
   type        = string
   description = "CIDR block allowed for SSH when enable_ssh is true (e.g. 203.0.113.50/32)"
   default     = "0.0.0.0/0"
-}
-
-variable "s3_bucket_prefix" {
-  type        = string
-  description = "Prefix for the S3 static website hosting bucket"
-  default     = "axionlimit-frontend"
 }
 
 variable "github_repo" {

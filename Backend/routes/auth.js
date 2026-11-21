@@ -23,7 +23,8 @@ router.get('/google/callback', passport.authenticate('google', { failureRedirect
   (req, res) => {
     try {
       const token = generateToken(req.user);
-      res.redirect(`${FRONTEND_URL}/#token=${token}`);
+      const redirectBase = FRONTEND_URL ? FRONTEND_URL.replace(/\/$/, '') : '';
+      res.redirect(`${redirectBase}/#token=${token}`);
     } catch (err) {
       console.error('Callback token generation error:', err);
       res.redirect('/?error=server_error');

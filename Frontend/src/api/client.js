@@ -1,32 +1,10 @@
 import axios from 'axios';
 
-let activeBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-
-export const getApiBaseUrl = () => activeBaseUrl;
-
 const api = axios.create({
-  baseURL: activeBaseUrl,
+  baseURL: '/',
 });
 
-// Attempt to load runtime configuration from /config.json (ensures frontend targets live backend when IP changes)
-if (typeof window !== 'undefined') {
-  fetch('/config.json?t=' + Date.now())
-    .then((res) => (res.ok ? res.json() : null))
-    .then((cfg) => {
-      if (cfg && cfg.apiUrl) {
-        activeBaseUrl = cfg.apiUrl;
-        api.defaults.baseURL = activeBaseUrl;
-      }
-    })
-    .catch(() => {
-      // Fallback silently to build-time or default URL
-    });
-}
-
 api.interceptors.request.use((config) => {
-  if (activeBaseUrl) {
-    config.baseURL = activeBaseUrl;
-  }
   const token = localStorage.getItem('axion_token');
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`;

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useToast } from './Toast';
 
-const DEFAULT_SERVER_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const DEFAULT_SERVER_URL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5000';
 
 export function getLanguageSnippets(apiKey = 'YOUR_API_KEY', serverUrl = DEFAULT_SERVER_URL) {
   return [

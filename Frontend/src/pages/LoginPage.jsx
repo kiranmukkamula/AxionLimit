@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useToast } from '../components/Toast';
-import { devLogin, getApiBaseUrl } from '../api/client';
+import { devLogin } from '../api/client';
 
 export default function LoginPage() {
   const { user, login } = useAuth();
@@ -32,7 +32,7 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
-    window.location.href = `${getApiBaseUrl()}/auth/google`;
+    window.location.href = '/auth/google';
   };
 
   return (

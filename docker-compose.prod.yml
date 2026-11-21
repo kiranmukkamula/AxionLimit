@@ -1,6 +1,9 @@
 version: '3.8'
 
 services:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Service 1: Redis In-Memory Cache & Sliding Window Rate Limiter
+  # ─────────────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine
     container_name: axion-redis
@@ -25,21 +28,24 @@ services:
     networks:
       - axion-internal
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Service 2: Express Backend REST API (Internal only - port 5000)
+  # ─────────────────────────────────────────────────────────────────────────────
   backend:
     build:
       context: ./Backend
       dockerfile: Dockerfile
     image: axionlimit-backend:production
     container_name: axion-backend
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
       - NODE_ENV=production
       - PORT=5000
       - REDIS_URL=redis://redis:6379
       - MONGO_URI=${MONGO_URI}
       - JWT_SECRET=${JWT_SECRET}
-      - FRONTEND_URL=${FRONTEND_URL}
+      - FRONTEND_URL=${FRONTEND_URL:-}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
       - GOOGLE_CALLBACK_URL=${GOOGLE_CALLBACK_URL:-}
@@ -50,6 +56,30 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - axion-internal
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Service 3: Frontend Web Server & Reverse Proxy (Nginx on Port 80)
+  # ─────────────────────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./Frontend
+      dockerfile: Dockerfile
+    image: axionlimit-frontend:production
+    container_name: axion-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
       interval: 15s
       timeout: 5s
       retries: 3

@@ -51,7 +51,4 @@ infrastructure/terraform.tfstate.*
 infrastructure/terraform.tfvars
 infrastructure/*.tfplan
 
-# ─── Script Credentials (Never commit) ─────────────────────
-scripts/.atlas.env
-scripts/.env.scripts
 

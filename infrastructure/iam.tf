@@ -76,7 +76,7 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-# Policy for GitHub Actions to deploy Frontend to S3 and trigger SSM deployments
+# Policy for GitHub Actions to trigger SSM deployments on EC2
 resource "aws_iam_role_policy" "github_actions_policy" {
   count = var.github_repo != "" ? 1 : 0
   name  = "${var.project_name}-github-actions-deploy-policy"
@@ -86,21 +86,7 @@ resource "aws_iam_role_policy" "github_actions_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "S3FrontendDeploy"
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:ListBucket",
-          "s3:DeleteObject"
-        ]
-        Resource = [
-          aws_s3_bucket.frontend.arn,
-          "${aws_s3_bucket.frontend.arn}/*"
-        ]
-      },
-      {
-        Sid    = "SSMBackendDeploy"
+        Sid    = "SSMDeployment"
         Effect = "Allow"
         Action = [
           "ssm:SendCommand",

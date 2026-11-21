@@ -3,12 +3,12 @@ resource "aws_security_group" "ec2" {
   description = "Security group for AxionLimit single EC2 host"
   vpc_id      = aws_vpc.main.id
 
-  # Inbound Rule 1: Backend API Port 5000
-  # Allows frontend browser calls and API clients to access rate limiter endpoints.
+  # Inbound Rule 1: HTTP Port 80 (Nginx Reverse Proxy & Frontend)
+  # Accepts public HTTP web traffic and client API calls, routing them internally.
   ingress {
-    description = "Public HTTP access to AxionLimit Backend API"
-    from_port   = 5000
-    to_port     = 5000
+    description = "Public HTTP access to Nginx web server and reverse proxy"
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -26,6 +26,10 @@ resource "aws_security_group" "ec2" {
       cidr_blocks = [var.admin_ip]
     }
   }
+
+  # NOTE ON BACKEND (PORT 5000):
+  # There is NO public ingress rule for port 5000. The Node.js Express backend
+  # runs entirely within Docker internal networking and is accessible only via Nginx.
 
   # NOTE ON REDIS (PORT 6379):
   # There is NO ingress rule for port 6379. Redis is strictly isolated inside

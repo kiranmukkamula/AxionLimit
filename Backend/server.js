@@ -21,17 +21,16 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:5000',
-  'http://axionlimit-alb-693430163.ap-south-1.elb.amazonaws.com',
   process.env.FRONTEND_URL
 ].filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow non-browser clients (curl/Postman), listed origins, or S3 static website hosts
-    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(o => origin.startsWith(o)) || origin.includes('.s3-website.')) {
+    // Allow non-browser clients (curl/Postman), listed origins, or same-origin requests
+    if (!origin || allowedOrigins.includes(origin) || allowedOrigins.some(o => origin.startsWith(o))) {
       callback(null, true);
     } else {
-      callback(null, true); // Permissive fallback for testing/ALB health checks
+      callback(null, true); // Permissive fallback for testing
     }
   },
   credentials: true,

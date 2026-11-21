@@ -11,7 +11,6 @@ on:
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
-# Prevent conflicting simultaneous deployments
 concurrency:
   group: production_deployment
   cancel-in-progress: false
@@ -22,7 +21,7 @@ permissions:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 1: Automated Unit & Security Tests
+  # STAGE 1: Automated Unit Tests
   # ───────────────────────────────────────────────────────────────────────────
   test:
     name: Run Unit Tests
@@ -49,48 +48,10 @@ jobs:
           npm test
 
   # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 2: Build & Deploy Frontend to AWS S3 Static Website
+  # STAGE 2: Deploy Multi-Container Stack to EC2 via AWS Systems Manager (SSM)
   # ───────────────────────────────────────────────────────────────────────────
-  deploy-frontend:
-    name: Build & Deploy Frontend
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: 'npm'
-          cache-dependency-path: Frontend/package-lock.json
-
-      - name: Install Frontend Dependencies
-        run: |
-          cd Frontend
-          npm ci
-
-      - name: Build Static Production Assets
-        run: |
-          cd Frontend
-          npm run build
-
-      - name: Configure AWS Credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ secrets.AWS_REGION || 'ap-south-1' }}
-
-      - name: Deploy Frontend to S3 Bucket
-        run: |
-          aws s3 sync Frontend/dist/ "s3://${{ secrets.S3_BUCKET_NAME }}" --delete
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 3: Deploy Backend Container via AWS Systems Manager (SSM)
-  # ───────────────────────────────────────────────────────────────────────────
-  deploy-backend:
-    name: Deploy Backend Container
+  deploy:
+    name: Deploy to Single EC2 Host
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -112,7 +73,7 @@ jobs:
               "git pull origin main",
               "docker compose -f docker-compose.prod.yml up -d --build",
               "sleep 10",
-              "curl -f http://localhost:5000/health || exit 1"
+              "curl -f http://localhost/health || exit 1"
             ]' \
             --query "Command.CommandId" \
             --output text)
