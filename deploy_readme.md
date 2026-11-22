@@ -130,7 +130,7 @@ Condition = {
 
 ### AWS Systems Manager (SSM) Deployment Policy
 
-AWS IAM does not support resource-level permissions for `ssm:GetCommandInvocation`, `ec2:DescribeInstances`, or `ssm:DescribeInstanceInformation`. In `infrastructure/iam.tf`, permissions are cleanly segregated:
+AWS IAM does not support resource-level permissions for `ssm:GetCommandInvocation`, `ec2:DescribeInstances`, or `ssm:DescribeInstanceInformation`. In `infrastructure/iam.tf`, permissions are cleanly segregated with least-privilege scoping:
 
 ```hcl
 Statement = [
@@ -160,8 +160,47 @@ Statement = [
     Effect   = "Allow"
     Action   = ["ssm:GetCommandInvocation"]
     Resource = "*"
+  },
+  {
+    Sid      = "SSMPutSecrets"
+    Effect   = "Allow"
+    Action   = ["ssm:PutParameter"]
+    Resource = [
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/MONGO_URI",
+      "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/JWT_SECRET"
+    ]
   }
 ]
+```
+
+### EC2 Role Inline Policy for Secrets Decryption
+
+The EC2 instance role (`ec2_role`) includes an inline policy permitting secure retrieval and decryption of production parameters from SSM Parameter Store:
+
+```hcl
+inline_policy {
+  name = "${var.project_name}-ec2-secrets-policy"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "SSMGetSecrets"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter", "ssm:GetParameters"]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/MONGO_URI",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/JWT_SECRET"
+        ]
+      },
+      {
+        Sid      = "KMSDecryptSecrets"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+      }
+    ]
+  })
+}
 ```
 
 ---

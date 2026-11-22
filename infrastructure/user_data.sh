@@ -12,7 +12,7 @@ echo "===================================================="
 # 1. Update OS packages
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y ca-certificates curl gnupg lsb-release git
+apt-get install -y ca-certificates curl gnupg lsb-release git awscli
 
 # 2. Install Official Docker Engine & Docker Compose Plugin
 install -m 0755 -d /etc/apt/keyrings

@@ -39,13 +39,6 @@ const corsOptionsDelegate = (req, callback) => {
     allowedOrigins.add(process.env.FRONTEND_URL.replace(/\/+$/, ''));
   }
 
-  // Support same-origin requests through Nginx via Host header (e.g. EC2 public IP or domain)
-  const host = req.headers.host;
-  if (host) {
-    allowedOrigins.add(`http://${host}`);
-    allowedOrigins.add(`https://${host}`);
-  }
-
   if (allowedOrigins.has(origin)) {
     return callback(null, { origin: true, credentials: true });
   }

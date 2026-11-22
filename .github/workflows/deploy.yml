@@ -93,6 +93,21 @@ jobs:
             exit 1
           fi
 
+      - name: Store Production Secrets in SSM Parameter Store
+        run: |
+          echo "Writing MONGO_URI and JWT_SECRET securely to AWS SSM Parameter Store..."
+          aws ssm put-parameter \
+            --name "/axionlimit/prod/MONGO_URI" \
+            --value "${{ secrets.MONGO_URI }}" \
+            --type "SecureString" \
+            --overwrite
+          aws ssm put-parameter \
+            --name "/axionlimit/prod/JWT_SECRET" \
+            --value "${{ secrets.JWT_SECRET }}" \
+            --type "SecureString" \
+            --overwrite
+          echo "✔ Secrets stored in SSM Parameter Store (values masked)."
+
       - name: Trigger Remote Deployment via AWS SSM Run Command
         run: |
           echo "Sending deployment script to EC2 instance: ${{ secrets.EC2_INSTANCE_ID }}..."
@@ -101,11 +116,34 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "set -e",
+              "if [ ! -d \"/opt/axionlimit/.git\" ]; then",
+              "  echo \"Bootstrapping repository in /opt/axionlimit...\"",
+              "  rm -rf /opt/axionlimit/* /opt/axionlimit/.[!.]* 2>/dev/null || true",
+              "  git clone https://github.com/kiranmukkamula/AxionLimit.git /opt/axionlimit",
+              "fi",
               "cd /opt/axionlimit",
-              "git pull origin main",
+              "git fetch origin main",
+              "git checkout '${{ github.sha }}'",
+              "echo \"Retrieving production secrets from AWS SSM Parameter Store...\"",
+              "MONGO_URI_VAL=$(aws ssm get-parameter --name \"/axionlimit/prod/MONGO_URI\" --with-decryption --query \"Parameter.Value\" --output text)",
+              "JWT_SECRET_VAL=$(aws ssm get-parameter --name \"/axionlimit/prod/JWT_SECRET\" --with-decryption --query \"Parameter.Value\" --output text)",
+              "EC2_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || echo \"\")",
+              "cat <<EOF > /opt/axionlimit/.env",
+              "NODE_ENV=production",
+              "PORT=5000",
+              "MONGO_URI=$MONGO_URI_VAL",
+              "JWT_SECRET=$JWT_SECRET_VAL",
+              "REDIS_URL=redis://redis:6379",
+              "FRONTEND_URL=http://$EC2_IP",
+              "ENABLE_DEV_LOGIN=false",
+              "EC2_SERVER_NAME=EC2-Mumbai",
+              "EOF",
+              "chmod 600 /opt/axionlimit/.env",
+              "echo \"Building and starting production containers...\"",
               "docker compose -f docker-compose.prod.yml up -d --build",
               "sleep 10",
-              "curl -f http://localhost/health || exit 1"
+              "curl -f http://localhost/health || exit 1",
+              "echo \"✔ AxionLimit deployment succeeded and verified healthy!\""
             ]' \
             --query "Command.CommandId" \
             --output text)

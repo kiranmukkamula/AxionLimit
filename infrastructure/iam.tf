@@ -1,3 +1,6 @@
+# Current AWS Caller Identity for Account ID resolution in IAM policies
+data "aws_caller_identity" "current" {}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # EC2 IAM Role & Instance Profile for AWS Systems Manager (SSM)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -17,6 +20,36 @@ resource "aws_iam_role" "ec2_role" {
       }
     ]
   })
+
+  # Least-Privilege Inline Policy to retrieve production SSM Parameter Store secrets
+  inline_policy {
+    name = "${var.project_name}-ec2-secrets-policy"
+    policy = jsonencode({
+      Version = "2012-10-17"
+      Statement = [
+        {
+          Sid    = "SSMGetSecrets"
+          Effect = "Allow"
+          Action = [
+            "ssm:GetParameter",
+            "ssm:GetParameters"
+          ]
+          Resource = [
+            "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/MONGO_URI",
+            "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/JWT_SECRET"
+          ]
+        },
+        {
+          Sid    = "KMSDecryptSecrets"
+          Effect = "Allow"
+          Action = [
+            "kms:Decrypt"
+          ]
+          Resource = "*"
+        }
+      ]
+    })
+  }
 
   tags = {
     Name = "${var.project_name}-ec2-role"
@@ -121,6 +154,17 @@ resource "aws_iam_role_policy" "github_actions_policy" {
           "ssm:GetCommandInvocation"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "SSMPutSecrets"
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter"
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/MONGO_URI",
+          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/axionlimit/prod/JWT_SECRET"
+        ]
       }
     ]
   })
