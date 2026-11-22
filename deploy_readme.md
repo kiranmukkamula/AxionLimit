@@ -97,7 +97,7 @@ With Elastic IP + GitHub OIDC:                            14 resources
 | 11 | `aws_eip.ec2_eip` | Compute | `var.use_elastic_ip ? 1 : 0` | Optional static public IPv4 address |
 | 12 | `aws_iam_openid_connect_provider.github` | IAM | `var.github_repo != "" ? 1 : 0` | GitHub Actions OIDC identity provider |
 | 13 | `aws_iam_role.github_actions` | IAM | `var.github_repo != "" ? 1 : 0` | IAM role assumed by GitHub Actions workflow |
-| 14 | `aws_iam_role_policy.github_actions_policy` | IAM | `var.github_repo != "" ? 1 : 0` | SSM deployment permissions for GitHub Actions |
+| 14 | `aws_iam_role_policy.github_actions_policy` | IAM | `var.github_repo != "" ? 1 : 0` | SSM & EC2 deployment permissions for GitHub Actions |
 
 > [!IMPORTANT]
 > **Terraform Plan Prerequisite:**
@@ -123,20 +123,29 @@ In `infrastructure/iam.tf`, the IAM trust policy strictly matches this immutable
 Condition = {
   StringEquals = {
     "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-    "token.actions.githubusercontent.com:sub" = [
-      "repo:${var.github_repo_owner}@${var.github_owner_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}",
-      "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
-    ]
+    "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo_owner}@${var.github_owner_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}"
   }
 }
 ```
 
 ### AWS Systems Manager (SSM) Deployment Policy
 
-AWS IAM does not support resource-level permissions for `ssm:GetCommandInvocation`. In `infrastructure/iam.tf`, permissions are cleanly segregated:
+AWS IAM does not support resource-level permissions for `ssm:GetCommandInvocation`, `ec2:DescribeInstances`, or `ssm:DescribeInstanceInformation`. In `infrastructure/iam.tf`, permissions are cleanly segregated:
 
 ```hcl
 Statement = [
+  {
+    Sid      = "EC2DescribeInstance"
+    Effect   = "Allow"
+    Action   = ["ec2:DescribeInstances"]
+    Resource = "*"
+  },
+  {
+    Sid      = "SSMDescribeInstance"
+    Effect   = "Allow"
+    Action   = ["ssm:DescribeInstanceInformation"]
+    Resource = "*"
+  },
   {
     Sid      = "SSMSendCommand"
     Effect   = "Allow"
@@ -181,13 +190,17 @@ To prevent malicious clients from bypassing rate limits or spoofing arbitrary IP
 
 ## 5. Authentication, JWT & Production Security
 
-1. **JWT_SECRET Enforcement:**
+1. **Header-Only API Key Verification:**
+   In `Backend/middleware/auth.js`, API keys are accepted exclusively via the `x-api-key` header. Query parameter transmission (`req.query.apiKey`) is strictly rejected to prevent credentials from being leaked into access logs, browser history, or shoulder surfing.
+2. **Secure Key ID Authentication with JWT:**
+   When authenticating via `x-api-key-id`, the client must supply a valid `Authorization: Bearer <token>` header. The middleware verifies that the authenticated user owns the key (`ApiKey.findOne({ _id: suppliedKeyId, userId: decoded.userId })`), and checks `isActive === true` and expiration. Unauthenticated Key ID lookups without a token have been completely removed.
+3. **JWT_SECRET Enforcement:**
    In `Backend/server.js`, startup verification fails immediately (`process.exit(1)`) if `JWT_SECRET` is missing in production mode. Hardcoded fallback strings have been removed from the codebase.
-2. **Developer Mock Login Protection:**
+4. **Developer Mock Login Protection:**
    In `Backend/routes/auth.js`, the `/auth/dev-login` endpoint returns `403 Forbidden` in production mode unless explicitly opted into via `ENABLE_DEV_LOGIN=true` (which defaults to `false` in `docker-compose.prod.yml`).
-3. **CORS Restrictions:**
-   In `Backend/server.js`, permissive CORS fallbacks have been removed. Requests with browser `Origin` headers are permitted only if they match `allowedOrigins` (`http://localhost:3000`, `http://localhost:5173`, or `FRONTEND_URL`). Non-browser clients (such as cURL or microservices) without an Origin header remain permitted.
-4. **Google OAuth 2.0 Limitation:**
+5. **Exact CORS Origin Matching:**
+   In `Backend/server.js`, unsafe `startsWith()` matching has been replaced with exact origin matching. Permitted origins include `http://localhost:3000`, `http://localhost:5173`, `FRONTEND_URL`, and same-origin host headers (`http://${host}`, `https://${host}`). Non-browser clients (such as cURL or microservices) without an Origin header remain permitted. Untrusted external origins are blocked with 403 Forbidden.
+6. **Google OAuth 2.0 Limitation:**
    > [!WARNING]
    > Google Cloud Console strictly prohibits raw HTTP IPv4 addresses (`http://13.234.x.x/auth/google/callback`) as authorized redirect URIs for production OAuth credentials. Google OAuth strictly requires a registered domain name and valid HTTPS certificate (via ACM + ALB or CloudFront). When accessing AxionLimit over an HTTP dynamic IP, Google OAuth will produce `redirect_uri_mismatch`. Developers must use Developer Mock Login (`ENABLE_DEV_LOGIN=true`) or direct API key headers.
 
@@ -199,8 +212,8 @@ All container definitions use maintained, supported LTS releases:
 
 | Container | Base Image | Version / Branch | Healthcheck |
 | :--- | :--- | :--- | :--- |
-| **Frontend** | `node:20-alpine` (Build) $\rightarrow$ `nginx:1.26-alpine` (Run) | Node 20 LTS / Nginx 1.26 Stable | `wget -qO- http://localhost/` |
-| **Backend** | `node:20-alpine` | Node 20 LTS (Iron) | `wget -qO- http://localhost:5000/health` |
+| **Frontend** | `node:24-alpine` (Build) $\rightarrow$ `nginx:1.30.7-alpine` (Run) | Node 24 LTS / Nginx 1.30.7 Stable | `wget -qO- http://localhost/` |
+| **Backend** | `node:24-alpine` | Node 24 LTS | `wget -qO- http://localhost:5000/health` |
 | **Redis** | `redis:7.2-alpine` | Redis 7.2 Stable | `redis-cli ping` |
 
 ### Startup Ordering & Atlas Recovery
@@ -219,8 +232,9 @@ frontend:
 ## 7. Redis Telemetry: Bounded Retention & Eviction Strategy
 
 * **Settings:** `--maxmemory 256mb --maxmemory-policy volatile-lru`
-* **Bounded Cardinality:** In `Backend/services/telemetry.js`, sorted sets (`topUsers`, `topEndpoints`) are pruned after every increment to retain only the top 100 entries (`zremrangebyrank(key, 0, -101)`), preventing memory exhaustion from endpoint fuzzing.
-* **Rolling TTL:** A 90-day rolling expiration (`expire 7776000`) is refreshed on all telemetry keys during logging.
+* **Atomic Execution:** In `Backend/services/rateLimiter.js`, the `SLIDING_WINDOW_LUA` script executes sliding-window rate limiting and telemetry recording in a single atomic Redis round-trip.
+* **Rolling TTL:** A 90-day rolling expiration (`expire 7776000`) is refreshed on all 5 telemetry keys (`tTotal`, `tAllowed`, `tBlocked`, `tTopUsers`, `tTopEndpoints`) during logging.
+* **Bounded Cardinality:** Sorted sets (`topUsers`, `topEndpoints`) are pruned atomically to retain only the top 100 entries (`zremrangebyrank(key, 0, -101)`), preventing memory exhaustion from endpoint scanning.
 * **What Happens When Redis Fills to 256 MB?**
   1. Under `volatile-lru`, Redis evicts the least recently used keys that have a TTL (transient rate-limit counters and expired cache keys).
   2. If an active rate-limit counter is evicted, that specific client's counter resets to 0, granting extra quota for the remainder of that 60-second window.
@@ -235,28 +249,36 @@ frontend:
 1. **Backend Unit Tests:**
    ```text
    > npm test --prefix Backend
-   # tests 7 | pass 7 | fail 0 (All 7 unit tests passed)
+   # tests 21 | pass 21 | fail 0 (All 21 unit tests passed in 2.6s)
    ```
+   Covers:
+   - Cryptographic API key generation, hashing (SHA-256), and masking.
+   - Header-only API key parsing (query param rejection).
+   - Rejection of `x-api-key-id` without valid JWT Bearer token.
+   - Rejection of invalid token or unauthorized user for Key ID.
+   - IP detection anti-spoofing (`req.ip` priority).
+   - IP blacklist and whitelist enforcement.
+   - Exact CORS matching and rejection of prefix/subdomain spoofing.
+   - Rate limiter Lua script atomic 90-day TTL on all 5 telemetry keys.
+   - Rate limiter Lua script sorted set top 100 bounding.
+   - Rate limiter fail-open behavior when Redis is offline.
+
 2. **Frontend Production Build:**
    ```text
    > npm run build --prefix Frontend
    dist/index.html                   0.76 kB
    dist/assets/index-DWc-8-Xz.css   15.04 kB
    dist/assets/index-BtQthxLq.js   693.29 kB
-   ✓ built in 5.69s (No config.json artifact created)
+   ✓ built in 1.88s (Clean Vite production bundle)
    ```
+
 3. **Docker Compose Syntax & Config Validation:**
    ```text
    > docker-compose -f docker-compose.prod.yml config
    # Validated: all 3 services, networks, volumes, healthchecks, and environment mappings
    ```
-4. **Terraform Formatting, Initialization & Validation:**
-   ```text
-   > terraform fmt
-   > terraform validate
-   Success! The configuration is valid.
-   ```
-5. **Git Tracking & Repository Cleanliness:**
+
+4. **Git Tracking & Repository Cleanliness:**
    - Removed 2,865 tracked files from `Backend/node_modules/` in Git.
    - Removed obsolete `Frontend/.env.production`.
    - Tracked and committed `infrastructure/.terraform.lock.hcl`.
@@ -296,3 +318,60 @@ frontend:
 | **Dynamic Public IPv4** | ~$3.65 / month | **$0.00 / month** | $0.005/hour while running; **released when stopped** |
 | **MongoDB Atlas (M0 Shared)** | **$0.00** | **$0.00** | Free Tier cluster |
 | **TOTAL ESTIMATED MONTHLY:** | **~$20.60 / month** | **~$1.76 / month** | **>91% cost reduction when stopped** |
+
+---
+
+## 11. Step-by-Step Deployment Guide
+
+### Step 1: Provision Infrastructure with Terraform
+
+1. Open PowerShell or Terminal and navigate to the `infrastructure` directory:
+   ```bash
+   cd infrastructure
+   cp terraform.tfvars.example terraform.tfvars
+   ```
+2. Configure AWS credentials on your workstation:
+   ```bash
+   aws configure
+   ```
+3. Initialize and provision AWS resources:
+   ```bash
+   terraform init
+   terraform plan -out=tfplan
+   terraform apply tfplan
+   ```
+4. Note the output values:
+   - `ec2_instance_id`
+   - `ec2_public_ip`
+   - `github_actions_role_arn`
+
+### Step 2: Configure GitHub Repository Secrets
+
+In your GitHub repository, navigate to **Settings** $\rightarrow$ **Secrets and variables** $\rightarrow$ **Actions** and add the following repository secrets:
+
+| Secret Name | Value Description |
+| :--- | :--- |
+| `AWS_ROLE_ARN` | The ARN of the IAM role (`github_actions_role_arn` from Terraform) |
+| `AWS_REGION` | `ap-south-1` |
+| `EC2_INSTANCE_ID` | The EC2 instance ID (`i-...`) |
+| `MONGO_URI` | Your MongoDB Atlas connection string |
+| `JWT_SECRET` | A secure random 64-character secret (`openssl rand -hex 32`) |
+
+### Step 3: Trigger Deployment via GitHub Actions
+
+1. In GitHub, go to the **Actions** tab.
+2. Select the **AxionLimit Continuous Deployment** workflow.
+3. Click **Run workflow** on the `main` branch.
+4. The workflow will:
+   - Run all 21 unit tests.
+   - Run preflight checks: verify the EC2 instance is in `running` state.
+   - Verify the SSM Agent is `Online`.
+   - Send the deployment command via SSM Run Command (`docker compose -f docker-compose.prod.yml up -d --build`).
+   - Run health checks and confirm success.
+
+### Step 4: MongoDB Atlas IP Allowlisting
+
+1. Copy the EC2 dynamic public IPv4 address from the AWS Console.
+2. In MongoDB Atlas, go to **Network Access** $\rightarrow$ **Add IP Address**.
+3. Add `<EC2_PUBLIC_IP>/32` with description "AxionLimit EC2".
+4. Refresh your browser at `http://<EC2_PUBLIC_IP>`. The AxionLimit dashboard is live!

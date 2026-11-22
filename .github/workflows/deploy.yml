@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 1: Automated Unit Tests
+  # STAGE 1: Automated Unit Tests (Runs on both push and workflow_dispatch)
   # ───────────────────────────────────────────────────────────────────────────
   test:
     name: Run Unit Tests
@@ -30,10 +30,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 20 LTS
+      - name: Setup Node.js 24 LTS
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: 'npm'
           cache-dependency-path: Backend/package-lock.json
 
@@ -49,10 +49,12 @@ jobs:
 
   # ───────────────────────────────────────────────────────────────────────────
   # STAGE 2: Deploy Multi-Container Stack to EC2 via AWS Systems Manager (SSM)
+  # (Strictly gated to manual workflow_dispatch triggers only)
   # ───────────────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to Single EC2 Host
     needs: test
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS Credentials via OIDC
@@ -60,6 +62,36 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION || 'ap-south-1' }}
+
+      - name: Pre-Flight Check - Verify EC2 Instance State
+        run: |
+          echo "Checking EC2 instance status for instance: ${{ secrets.EC2_INSTANCE_ID }}..."
+          INSTANCE_STATE=$(aws ec2 describe-instances \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "Reservations[0].Instances[0].State.Name" \
+            --output text)
+
+          echo "EC2 Instance state: $INSTANCE_STATE"
+          if [ "$INSTANCE_STATE" != "running" ]; then
+            echo "❌ Deployment aborted: EC2 instance ${{ secrets.EC2_INSTANCE_ID }} is not running (current state: $INSTANCE_STATE)."
+            echo "Please start the instance via AWS Console or CLI before running deployment."
+            exit 1
+          fi
+
+      - name: Pre-Flight Check - Verify SSM Agent Connectivity
+        run: |
+          echo "Checking SSM Agent connectivity for instance: ${{ secrets.EC2_INSTANCE_ID }}..."
+          SSM_STATUS=$(aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "InstanceInformationList[0].PingStatus" \
+            --output text)
+
+          echo "SSM Agent ping status: $SSM_STATUS"
+          if [ "$SSM_STATUS" != "Online" ]; then
+            echo "❌ Deployment aborted: SSM Agent on instance ${{ secrets.EC2_INSTANCE_ID }} is not Online (status: $SSM_STATUS)."
+            echo "Ensure the instance is booted, outbound port 443 is accessible, and the amazon-ssm-agent service is running."
+            exit 1
+          fi
 
       - name: Trigger Remote Deployment via AWS SSM Run Command
         run: |

@@ -66,10 +66,7 @@ resource "aws_iam_role" "github_actions" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-            "token.actions.githubusercontent.com:sub" = [
-              "repo:${var.github_repo_owner}@${var.github_owner_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}",
-              "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
-            ]
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo_owner}@${var.github_owner_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}"
           }
         }
       }
@@ -81,7 +78,7 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-# Least-Privilege Policy for GitHub Actions to trigger SSM deployments on EC2
+# Least-Privilege Policy for GitHub Actions to inspect EC2 state and trigger SSM deployments
 resource "aws_iam_role_policy" "github_actions_policy" {
   count = var.github_repo != "" ? 1 : 0
   name  = "${var.project_name}-github-actions-deploy-policy"
@@ -90,6 +87,22 @@ resource "aws_iam_role_policy" "github_actions_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
+      {
+        Sid    = "EC2DescribeInstance"
+        Effect = "Allow"
+        Action = [
+          "ec2:DescribeInstances"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "SSMDescribeInstance"
+        Effect = "Allow"
+        Action = [
+          "ssm:DescribeInstanceInformation"
+        ]
+        Resource = "*"
+      },
       {
         Sid    = "SSMSendCommand"
         Effect = "Allow"

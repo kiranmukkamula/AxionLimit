@@ -23,27 +23,37 @@ app.set('trust proxy', 1);
 
 connectDB();
 
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:5173',
-  process.env.FRONTEND_URL
-].filter(Boolean);
+const corsOptionsDelegate = (req, callback) => {
+  const origin = req.header('Origin');
+  // Allow non-browser requests (e.g. server-to-server, cURL, Mobile apps, healthchecks) with no Origin header
+  if (!origin) {
+    return callback(null, { origin: true, credentials: true });
+  }
 
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow non-browser requests (e.g. server-to-server, cURL, Mobile apps) with no Origin header
-    if (!origin) {
-      return callback(null, true);
-    }
-    // Allow configured development or production frontend origins
-    if (allowedOrigins.includes(origin) || allowedOrigins.some(o => origin.startsWith(o))) {
-      return callback(null, true);
-    }
-    // Strictly block untrusted external browser origins
-    return callback(new Error(`Origin ${origin} not allowed by CORS policy`));
-  },
-  credentials: true,
-}));
+  const allowedOrigins = new Set([
+    'http://localhost:3000',
+    'http://localhost:5173'
+  ]);
+
+  if (process.env.FRONTEND_URL) {
+    allowedOrigins.add(process.env.FRONTEND_URL.replace(/\/+$/, ''));
+  }
+
+  // Support same-origin requests through Nginx via Host header (e.g. EC2 public IP or domain)
+  const host = req.headers.host;
+  if (host) {
+    allowedOrigins.add(`http://${host}`);
+    allowedOrigins.add(`https://${host}`);
+  }
+
+  if (allowedOrigins.has(origin)) {
+    return callback(null, { origin: true, credentials: true });
+  }
+
+  return callback(new Error(`Origin ${origin} not allowed by CORS policy`));
+};
+
+app.use(cors(corsOptionsDelegate));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

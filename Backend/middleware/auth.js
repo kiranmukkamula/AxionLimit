@@ -45,14 +45,14 @@ const enforceIpRules = (metadata, clientIp) => {
 };
 
 const verifyApiKey = async (req, res, next) => {
-  const suppliedApiKey = req.headers['x-api-key'] || req.query.apiKey;
+  const suppliedApiKey = req.headers['x-api-key'];
   const suppliedKeyId = req.headers['x-api-key-id'];
 
   if (!suppliedApiKey && !suppliedKeyId) {
     return res.status(401).json({ error: 'API key or Key ID is missing.' });
   }
 
-  // Security: Prioritize trusted Express req.ip (populated via Nginx reverse proxy)
+  // Security: Prioritize trusted Express req.ip (populated via Nginx reverse proxy with trust proxy = 1)
   // Do NOT allow untrusted external headers (e.g. x-user-ip, x-client-ip) to spoof IP addresses
   const clientIp = (
     req.ip ||
@@ -95,40 +95,56 @@ const verifyApiKey = async (req, res, next) => {
     }
   }
 
+  // If x-api-key-id is provided, require a valid JWT Bearer token and verify ownership
   if (suppliedKeyId) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (token) {
-      try {
-        const decoded = jwt.verify(token, getJwtSecret());
-        req.user = decoded;
-        const apiKeyDoc = await ApiKey.findOne({ _id: suppliedKeyId, userId: decoded.userId });
-        if (apiKeyDoc) {
-          const metadata = {
-            id: apiKeyDoc._id,
-            keyHash: apiKeyDoc.keyHash,
-            name: apiKeyDoc.name,
-            userId: apiKeyDoc.userId,
-            isActive: apiKeyDoc.isActive,
-            expiresAt: apiKeyDoc.expiresAt,
-            limit: apiKeyDoc.rateLimit.limit,
-            windowMs: apiKeyDoc.rateLimit.windowMs,
-            ipWhitelist: apiKeyDoc.ipWhitelist,
-            ipBlacklist: apiKeyDoc.ipBlacklist,
-          };
-          const ipCheck = enforceIpRules(metadata, clientIp);
-          if (!ipCheck.allowed) {
-            return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
-          }
-          req.apiKeyMetadata = metadata;
-          return next();
-        }
-      } catch (e) {
-        // Fall through
+    if (!token) {
+      return res.status(401).json({ error: 'Key ID authentication requires a valid Bearer token.' });
+    }
+
+    try {
+      const decoded = jwt.verify(token, getJwtSecret());
+      req.user = decoded;
+      const apiKeyDoc = await ApiKey.findOne({ _id: suppliedKeyId, userId: decoded.userId });
+      if (!apiKeyDoc) {
+        return res.status(401).json({ error: 'API key not found or not owned by user.' });
       }
+
+      if (!apiKeyDoc.isActive) {
+        return res.status(403).json({ error: 'API key is inactive.' });
+      }
+
+      if (apiKeyDoc.expiresAt && isExpired(apiKeyDoc.expiresAt)) {
+        return res.status(403).json({ error: 'API key has expired.' });
+      }
+
+      const metadata = {
+        id: apiKeyDoc._id,
+        keyHash: apiKeyDoc.keyHash,
+        name: apiKeyDoc.name,
+        userId: apiKeyDoc.userId,
+        isActive: apiKeyDoc.isActive,
+        expiresAt: apiKeyDoc.expiresAt,
+        limit: apiKeyDoc.rateLimit.limit,
+        windowMs: apiKeyDoc.rateLimit.windowMs,
+        ipWhitelist: apiKeyDoc.ipWhitelist,
+        ipBlacklist: apiKeyDoc.ipBlacklist,
+      };
+
+      const ipCheck = enforceIpRules(metadata, clientIp);
+      if (!ipCheck.allowed) {
+        return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
+      }
+
+      req.apiKeyMetadata = metadata;
+      return next();
+    } catch (tokenErr) {
+      return res.status(401).json({ error: 'Invalid or expired authorization token for Key ID.' });
     }
   }
 
+  // Raw API Key authentication via x-api-key header
   const keyHash = hashApiKey(suppliedApiKey);
 
   if (redisClient && redisClient.status === 'ready') {
@@ -151,40 +167,6 @@ const verifyApiKey = async (req, res, next) => {
       }
     } catch (redisErr) {
       console.error('Redis API key cache error:', redisErr);
-    }
-  }
-
-  if (suppliedKeyId) {
-    try {
-      const apiKeyDoc = await ApiKey.findById(suppliedKeyId);
-      if (apiKeyDoc) {
-        const metadata = {
-          id: apiKeyDoc._id,
-          keyHash: apiKeyDoc.keyHash,
-          name: apiKeyDoc.name,
-          userId: apiKeyDoc.userId,
-          isActive: apiKeyDoc.isActive,
-          expiresAt: apiKeyDoc.expiresAt,
-          limit: apiKeyDoc.rateLimit.limit,
-          windowMs: apiKeyDoc.rateLimit.windowMs,
-          ipWhitelist: apiKeyDoc.ipWhitelist,
-          ipBlacklist: apiKeyDoc.ipBlacklist,
-        };
-        if (!metadata.isActive) {
-          return res.status(403).json({ error: 'API key is inactive.' });
-        }
-        if (metadata.expiresAt && isExpired(metadata.expiresAt)) {
-          return res.status(403).json({ error: 'API key has expired.' });
-        }
-        const ipCheck = enforceIpRules(metadata, clientIp);
-        if (!ipCheck.allowed) {
-          return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
-        }
-        req.apiKeyMetadata = metadata;
-        return next();
-      }
-    } catch (dbErr) {
-      console.error('Database API key lookup by ID error:', dbErr);
     }
   }
 
@@ -237,5 +219,6 @@ const verifyApiKey = async (req, res, next) => {
 module.exports = {
   verifyJWT,
   verifyApiKey,
-  getJwtSecret
+  getJwtSecret,
+  enforceIpRules
 };

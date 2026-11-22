@@ -43,18 +43,29 @@ local tAllowed = 'telemetry:' .. ownerUserId .. ':allowed_requests'
 local tBlocked = 'telemetry:' .. ownerUserId .. ':blocked_requests'
 local tTopUsers = 'telemetry:' .. ownerUserId .. ':top_users'
 local tTopEndpoints = 'telemetry:' .. ownerUserId .. ':top_endpoints'
+local telemetryTTL = 7776000 -- 90 days in seconds
 
 redis.call('INCR', tTotal)
+redis.call('EXPIRE', tTotal, telemetryTTL)
+
 if allowed == 1 then
     redis.call('INCR', tAllowed)
+    redis.call('EXPIRE', tAllowed, telemetryTTL)
 else
     redis.call('INCR', tBlocked)
+    redis.call('EXPIRE', tBlocked, telemetryTTL)
 end
+
 if activeIdentifier and activeIdentifier ~= '' then
     redis.call('ZINCRBY', tTopUsers, 1, activeIdentifier)
+    redis.call('ZREMRANGEBYRANK', tTopUsers, 0, -101)
+    redis.call('EXPIRE', tTopUsers, telemetryTTL)
 end
+
 if activeEndpoint and activeEndpoint ~= '' then
     redis.call('ZINCRBY', tTopEndpoints, 1, activeEndpoint)
+    redis.call('ZREMRANGEBYRANK', tTopEndpoints, 0, -101)
+    redis.call('EXPIRE', tTopEndpoints, telemetryTTL)
 end
 
 return {allowed, remaining, retryAfter}
@@ -130,6 +141,7 @@ const isAllowed = async (identifier, limit, windowMs, userId = null, activeUserL
 };
 
 module.exports = {
-  isAllowed
+  isAllowed,
+  SLIDING_WINDOW_LUA
 };
 
