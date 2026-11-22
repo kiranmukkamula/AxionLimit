@@ -49,5 +49,4 @@ infrastructure/terraform.tfstate
 infrastructure/terraform.tfstate.*
 infrastructure/terraform.tfvars
 infrastructure/*.tfplan
-
-
+infrastructure/tfplan
