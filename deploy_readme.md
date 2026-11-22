@@ -1,6 +1,6 @@
 # AxionLimit — Single EC2 Multi-Container Deployment Guide
 
-> Complete, secure, and cost-conscious AWS deployment guide for **AxionLimit** — a centralized API rate limiter and real-time telemetry service running on a **single EC2 instance** via Docker Compose.
+> Production-ready, secure, and cost-conscious AWS deployment guide for **AxionLimit** — a centralized API rate limiter and real-time telemetry service running on a **single EC2 instance** via Docker Compose.
 
 ---
 
@@ -62,304 +62,237 @@ External persistence is provided by a free **MongoDB Atlas (M0)** managed cluste
 
 1. **Single Entry Point (Port 80):** Nginx is the only service that publishes a port to the EC2 host. It serves compiled React static assets and reverse-proxies `/api/`, `/auth/`, `/health`, and `/server-info` requests internally to the Express backend.
 2. **Private Internal Networking:** The Express backend (port 5000) and Redis (port 6379) are completely private inside the Docker bridge network (`axion-internal`). Neither is directly reachable from the public internet.
-3. **Same-Origin API Communication:** The React frontend communicates with the backend using relative URLs (e.g. `baseURL: '/'`). No public IP hardcoding, no CORS issues between frontend and backend, and no frontend rebuild required when the EC2 dynamic public IP changes.
-4. **Persistent EBS-Backed Redis:** Redis data is stored on a persistent Docker volume (`axion_redis_data`) located on the EC2 host's 20 GB gp3 encrypted EBS disk, with AOF and RDB snapshots.
-5. **Zero AWS NAT or Load Balancer Fees:** Eliminates Application Load Balancers ($18+/month) and NAT Gateways ($32+/month), delivering a full stack on AWS at baseline compute and storage cost.
+3. **Same-Origin API Communication:** The React frontend communicates with the backend using relative URLs (`baseURL: '/'`). No public IP hardcoding, no CORS issues between frontend and backend, and no frontend rebuild required when the EC2 dynamic public IP changes.
+4. **Persistent EBS-Backed Redis:** Redis data is stored on a persistent named Docker volume (`axion_redis_data`) located on the EC2 host's 20 GB gp3 encrypted EBS disk, with AOF and RDB snapshots.
+5. **Zero AWS NAT or Load Balancer Fees:** Eliminates Application Load Balancers ($18+/month) and NAT Gateways ($32+/month), delivering a full stack on AWS at baseline compute and storage cost (~$1.76/mo stopped, ~$20.60/mo running 24/7).
 
 ---
 
-## 2. Project Directory Structure
+## 2. Infrastructure as Code: Terraform Resource Breakdown
+
+### Resource Recalculation
+
+The Terraform code declares **10 baseline resources**, with up to **4 optional/conditional resources**:
 
 ```text
-AxionLimit/
-├── Backend/                       # Node.js 18 & Express REST API
-│   ├── config/                    # Mongoose & ioredis connection managers
-│   ├── middleware/                # Rate limit & JWT authentication middleware
-│   ├── models/                    # MongoDB schemas (ApiKey.js, User.js)
-│   ├── routes/                    # API endpoints (/api, /api/keys, /auth)
-│   ├── services/                  # Sliding window algorithm & Redis telemetry
-│   ├── test/                      # Unit tests (apiKeySecurity, perUserRateLimit)
-│   ├── Dockerfile                 # Alpine Node.js 18 container (non-root node user)
-│   ├── .dockerignore              # Excludes local node_modules and .env files
-│   └── package.json
-│
-├── Frontend/                      # React 19 + Vite SPA
-│   ├── nginx/
-│   │   └── default.conf           # Reverse proxy configuration & SPA try_files
-│   ├── src/
-│   │   ├── api/client.js          # Axios client with same-origin relative baseURL: '/'
-│   │   ├── components/            # UI components (Toast, IntegrationSnippets, etc.)
-│   │   └── pages/                 # Dashboard, Docs, LoginPage
-│   ├── Dockerfile                 # Multi-stage build: Node.js builder -> Nginx Alpine
-│   ├── .dockerignore              # Excludes node_modules and build artifacts
-│   └── package.json
-│
-├── Testing/                       # Load testing and traffic simulation scripts
-│   ├── test-rate-limit.js         # Traffic simulator (constant & burst modes)
-│   └── package.json
-│
-├── docker-compose.prod.yml        # Production multi-container definition (Frontend + Backend + Redis)
-├── docker-compose.yml             # Local development Docker Compose (Redis only)
-│
-├── infrastructure/                # Terraform Infrastructure as Code (ap-south-1)
-│   ├── versions.tf                # Terraform >= 1.5.0, AWS provider ~> 5.40
-│   ├── providers.tf               # AWS provider config with default tags
-│   ├── variables.tf               # Parameterized variables
-│   ├── networking.tf              # Dedicated VPC (10.0.0.0/16), Public Subnet, IGW, Route Table
-│   ├── security.tf                # Security Group (Port 80 HTTP open, Port 5000/6379 closed)
-│   ├── iam.tf                     # EC2 IAM instance profile for SSM & GitHub Actions OIDC role
-│   ├── user_data.sh               # Cloud-init script: installs Docker CE & enables SSM Agent
-│   ├── ec2.tf                     # t3.small, Standard CPU credits, 20GB gp3 EBS disk
-│   ├── outputs.tf                 # Public application URL, EC2 instance ID, public IP
-│   └── terraform.tfvars.example   # Variable templates
-│
-├── .github/
-│   └── workflows/
-│       └── deploy.yml             # Automated CI/CD pipeline using AWS OIDC & AWS SSM
-│
-├── .gitignore                     # Ignores Terraform state, lock files, and secrets
-└── deploy_readme.md               # Master deployment guide (this document)
+Baseline (use_elastic_ip = false, github_repo = ""):      10 resources
+With GitHub Actions OIDC (github_repo configured):        13 resources
+With Elastic IP + GitHub OIDC:                            14 resources
+```
+
+#### Complete Resource Inventory
+
+| # | Resource Address in Terraform | Type | Condition | Purpose |
+| :-: | :--- | :--- | :--- | :--- |
+| 1 | `aws_vpc.main` | Core Network | Baseline | Dedicated VPC (`10.0.0.0/16`) in `ap-south-1` |
+| 2 | `aws_internet_gateway.gw` | Core Network | Baseline | Internet gateway attached to VPC |
+| 3 | `aws_subnet.public` | Core Network | Baseline | Public subnet (`10.0.1.0/24`) in `ap-south-1a` |
+| 4 | `aws_route_table.public` | Core Network | Baseline | Default route table directing `0.0.0.0/0` to IGW |
+| 5 | `aws_route_table_association.public` | Core Network | Baseline | Associates route table with public subnet |
+| 6 | `aws_security_group.ec2` | Security | Baseline | Inbound Port 80 open; Ports 5000 & 6379 blocked |
+| 7 | `aws_iam_role.ec2_role` | IAM | Baseline | Service role for EC2 (`sts:AssumeRole`) |
+| 8 | `aws_iam_role_policy_attachment.ssm_core` | IAM | Baseline | Attaches `AmazonSSMManagedInstanceCore` for AWS Systems Manager |
+| 9 | `aws_iam_instance_profile.ec2_profile` | IAM | Baseline | Links IAM role to EC2 instance |
+| 10 | `aws_instance.server` | Compute | Baseline | `t3.small` instance, Standard CPU credits, 20GB gp3 EBS disk |
+| 11 | `aws_eip.ec2_eip` | Compute | `var.use_elastic_ip ? 1 : 0` | Optional static public IPv4 address |
+| 12 | `aws_iam_openid_connect_provider.github` | IAM | `var.github_repo != "" ? 1 : 0` | GitHub Actions OIDC identity provider |
+| 13 | `aws_iam_role.github_actions` | IAM | `var.github_repo != "" ? 1 : 0` | IAM role assumed by GitHub Actions workflow |
+| 14 | `aws_iam_role_policy.github_actions_policy` | IAM | `var.github_repo != "" ? 1 : 0` | SSM deployment permissions for GitHub Actions |
+
+> [!IMPORTANT]
+> **Terraform Plan Prerequisite:**
+> Running `terraform plan` requires valid AWS credentials configured on the workstation (via `aws configure` or environment variables `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`). Without credentials, Terraform cannot query the live Ubuntu 22.04 LTS AMI data source (`data.aws_ami.ubuntu`) or inspect existing state in `ap-south-1`.
+
+---
+
+## 3. GitHub Actions OIDC: Immutable Subject Claim Enforcement
+
+GitHub enforces **Immutable Subject Claims** for all repositories created after **July 15, 2026** (to eliminate namespace recycling vulnerabilities when repos are renamed or transferred):
+
+* **Repository Creation Date:** July 17, 2026 (`kiranmukkamula/AxionLimit`)
+* **Repository ID:** `1303665861`
+* **Owner ID:** `152879853`
+* **Immutable Subject Claim Format:**
+  ```text
+  repo:kiranmukkamula@152879853/AxionLimit@1303665861:ref:refs/heads/main
+  ```
+
+In `infrastructure/iam.tf`, the IAM trust policy strictly matches this immutable claim and restricts assumption exclusively to the **`main` branch**:
+
+```hcl
+Condition = {
+  StringEquals = {
+    "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+    "token.actions.githubusercontent.com:sub" = [
+      "repo:${var.github_repo_owner}@${var.github_owner_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}",
+      "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
+    ]
+  }
+}
+```
+
+### AWS Systems Manager (SSM) Deployment Policy
+
+AWS IAM does not support resource-level permissions for `ssm:GetCommandInvocation`. In `infrastructure/iam.tf`, permissions are cleanly segregated:
+
+```hcl
+Statement = [
+  {
+    Sid      = "SSMSendCommand"
+    Effect   = "Allow"
+    Action   = ["ssm:SendCommand"]
+    Resource = [
+      "arn:aws:ssm:${var.aws_region}:*:document/AWS-RunShellScript",
+      aws_instance.server.arn
+    ]
+  },
+  {
+    Sid      = "SSMGetInvocation"
+    Effect   = "Allow"
+    Action   = ["ssm:GetCommandInvocation"]
+    Resource = "*"
+  }
+]
 ```
 
 ---
 
-## 3. Container Stack Specification
+## 4. Client IP Security & Anti-Spoofing Architecture
 
-### Multi-Stage Frontend Container (`Frontend/Dockerfile`)
+To prevent malicious clients from bypassing rate limits or spoofing arbitrary IP addresses to ban innocent users:
 
-* **Stage 1 (Builder):** Uses `node:18-alpine` to run `npm ci` and compile production static assets (`dist/`) via Vite.
-* **Stage 2 (Production Runner):** Copies compiled assets into `nginx:1.25-alpine` (`/usr/share/nginx/html`) along with `Frontend/nginx/default.conf`. Node.js and build tools are completely discarded in Stage 2, resulting in a minimal attack surface and small image footprint (~25 MB).
-
-### Nginx Routing Rules (`Frontend/nginx/default.conf`)
-
-| Request Path | Action | Description |
-| :--- | :--- | :--- |
-| `/` and `/*` | `try_files $uri $uri/ /index.html` | Serves React SPA pages with client-side routing. |
-| `/assets/*` | Static file delivery | Cached for 1 year with `Cache-Control: public, immutable`. |
-| `/api/*` | `proxy_pass http://backend:5000` | Proxies API key validation, rate check, and telemetry to backend. |
-| `/auth/*` | `proxy_pass http://backend:5000` | Proxies authentication, dev login, and Google OAuth to backend. |
-| `/health` | `proxy_pass http://backend:5000` | Exposes application readiness status (`UP` / `DOWN`). |
-| `/server-info` | `proxy_pass http://backend:5000` | Returns server metadata and uptime. |
-
-### Backend Container (`Backend/Dockerfile`)
-
-* Runs as unprivileged standard user (`USER node`).
-* Internal port `5000` (not published to host).
-* Graceful shutdown handlers catch `SIGTERM` and `SIGINT` to safely disconnect MongoDB and Redis before exit.
-* Healthcheck polls `http://localhost:5000/health`.
-
-### Redis Container
-
-* Image: `redis:7.2-alpine`.
-* Private internal port `6379` (`expose: - "6379"`).
-* **Persistence:** Named volume `redis_data` mapping to `/data` on the 20 GB gp3 EBS root volume.
-* **AOF + RDB:** Append-only logging flushed every second (`--appendfsync everysec`) plus snapshot points (`--save 900 1 --save 300 10`).
-* **Memory Management:** `--maxmemory 256mb --maxmemory-policy volatile-lru`. Keys with TTLs (`rate_limit:*`, `apikey:*`) are evicted under memory pressure using LRU order. Persistent telemetry keys without TTL (`telemetry:*`) remain preserved.
-* **Fail-Open Strategy:** If Redis experiences temporary failure or eviction pressure, AxionLimit catch blocks fail open (`allowed: true`) to ensure upstream clients are not blocked.
+1. **Nginx Header Replacement:**
+   In `Frontend/nginx/default.conf`, Nginx explicitly overwrites any client-supplied `X-Forwarded-For` header with the verified TCP remote address:
+   ```nginx
+   proxy_set_header X-Real-IP $remote_addr;
+   proxy_set_header X-Forwarded-For $remote_addr;
+   ```
+2. **Express Trusted Proxy:**
+   In `Backend/server.js`, `app.set('trust proxy', 1)` instructs Express to trust the single reverse-proxy hop (Nginx) and extract `req.ip` from the Nginx-supplied header.
+3. **Strict Backend IP Extraction:**
+   In `Backend/middleware/auth.js`, client IP detection strictly uses `req.ip`:
+   ```javascript
+   const clientIp = (req.ip || req.socket?.remoteAddress || '127.0.0.1').trim();
+   req.clientIp = clientIp;
+   ```
+   Untrusted headers such as `x-user-ip` or `x-client-ip` are ignored for network address resolution, preventing header spoofing.
 
 ---
 
-## 4. AWS Networking & Security Group Configuration
+## 5. Authentication, JWT & Production Security
 
-Target Region: **Mumbai (`ap-south-1`)**.
-
-### Security Group Inbound & Outbound Rules
-
-| Direction | Port | Protocol | Source / Destination | Security Rationale |
-| :--- | :--- | :--- | :--- | :--- |
-| **Inbound** | `80` | TCP | `0.0.0.0/0` | Public HTTP traffic to Nginx (serves frontend & proxies API). |
-| **Inbound** | `22` | TCP | *Admin IP only* | Controlled via `var.enable_ssh`. Disabled by default in favor of AWS SSM. |
-| **Inbound** | `5000` | TCP | **BLOCKED** | Backend is internal only inside Docker bridge network. |
-| **Inbound** | `6379` | TCP | **BLOCKED** | Redis is internal only inside Docker bridge network. |
-| **Inbound** | `27017`| TCP | **BLOCKED** | MongoDB is hosted remotely on MongoDB Atlas. |
-| **Outbound**| All | All | `0.0.0.0/0` | Outbound TLS to MongoDB Atlas (27017), AWS SSM (443), and Docker Hub. |
+1. **JWT_SECRET Enforcement:**
+   In `Backend/server.js`, startup verification fails immediately (`process.exit(1)`) if `JWT_SECRET` is missing in production mode. Hardcoded fallback strings have been removed from the codebase.
+2. **Developer Mock Login Protection:**
+   In `Backend/routes/auth.js`, the `/auth/dev-login` endpoint returns `403 Forbidden` in production mode unless explicitly opted into via `ENABLE_DEV_LOGIN=true` (which defaults to `false` in `docker-compose.prod.yml`).
+3. **CORS Restrictions:**
+   In `Backend/server.js`, permissive CORS fallbacks have been removed. Requests with browser `Origin` headers are permitted only if they match `allowedOrigins` (`http://localhost:3000`, `http://localhost:5173`, or `FRONTEND_URL`). Non-browser clients (such as cURL or microservices) without an Origin header remain permitted.
+4. **Google OAuth 2.0 Limitation:**
+   > [!WARNING]
+   > Google Cloud Console strictly prohibits raw HTTP IPv4 addresses (`http://13.234.x.x/auth/google/callback`) as authorized redirect URIs for production OAuth credentials. Google OAuth strictly requires a registered domain name and valid HTTPS certificate (via ACM + ALB or CloudFront). When accessing AxionLimit over an HTTP dynamic IP, Google OAuth will produce `redirect_uri_mismatch`. Developers must use Developer Mock Login (`ENABLE_DEV_LOGIN=true`) or direct API key headers.
 
 ---
 
-## 5. Cost Management & Billing Analysis
+## 6. Container Stack & Runtime Versions
 
-All costs are calculated using **Mumbai (`ap-south-1`)** AWS pricing:
+All container definitions use maintained, supported LTS releases:
+
+| Container | Base Image | Version / Branch | Healthcheck |
+| :--- | :--- | :--- | :--- |
+| **Frontend** | `node:20-alpine` (Build) $\rightarrow$ `nginx:1.26-alpine` (Run) | Node 20 LTS / Nginx 1.26 Stable | `wget -qO- http://localhost/` |
+| **Backend** | `node:20-alpine` | Node 20 LTS (Iron) | `wget -qO- http://localhost:5000/health` |
+| **Redis** | `redis:7.2-alpine` | Redis 7.2 Stable | `redis-cli ping` |
+
+### Startup Ordering & Atlas Recovery
+
+In `docker-compose.prod.yml`, the frontend depends on the backend container without healthcheck gating:
+```yaml
+frontend:
+  depends_on:
+    - backend
+```
+* **Resilience Benefit:** Nginx starts immediately and serves the React SPA on port 80 even if the backend is waiting for the EC2 IP to be added to MongoDB Atlas Network Access.
+* **Backend Self-Healing Loop:** If MongoDB Atlas rejects the connection, Mongoose logs the error and calls `process.exit(1)`. The Docker daemon (`restart: unless-stopped`) automatically restarts the backend container with exponential backoff. As soon as the administrator enters the IP in MongoDB Atlas, the next container restart connects cleanly and `/health` turns `UP`.
+
+---
+
+## 7. Redis Telemetry: Bounded Retention & Eviction Strategy
+
+* **Settings:** `--maxmemory 256mb --maxmemory-policy volatile-lru`
+* **Bounded Cardinality:** In `Backend/services/telemetry.js`, sorted sets (`topUsers`, `topEndpoints`) are pruned after every increment to retain only the top 100 entries (`zremrangebyrank(key, 0, -101)`), preventing memory exhaustion from endpoint fuzzing.
+* **Rolling TTL:** A 90-day rolling expiration (`expire 7776000`) is refreshed on all telemetry keys during logging.
+* **What Happens When Redis Fills to 256 MB?**
+  1. Under `volatile-lru`, Redis evicts the least recently used keys that have a TTL (transient rate-limit counters and expired cache keys).
+  2. If an active rate-limit counter is evicted, that specific client's counter resets to 0, granting extra quota for the remainder of that 60-second window.
+  3. If Redis runs out of evictable keys, any subsequent write command throws `OOM command not allowed`. AxionLimit's catch blocks in `Backend/services/rateLimiter.js` **fail open** (`allowed: true, remaining: 1`), ensuring upstream APIs are not blocked.
+
+---
+
+## 8. Verification & Testing Status
+
+### Executed Tests (Verified & Passed)
+
+1. **Backend Unit Tests:**
+   ```text
+   > npm test --prefix Backend
+   # tests 7 | pass 7 | fail 0 (All 7 unit tests passed)
+   ```
+2. **Frontend Production Build:**
+   ```text
+   > npm run build --prefix Frontend
+   dist/index.html                   0.76 kB
+   dist/assets/index-DWc-8-Xz.css   15.04 kB
+   dist/assets/index-BtQthxLq.js   693.29 kB
+   ✓ built in 5.69s (No config.json artifact created)
+   ```
+3. **Docker Compose Syntax & Config Validation:**
+   ```text
+   > docker-compose -f docker-compose.prod.yml config
+   # Validated: all 3 services, networks, volumes, healthchecks, and environment mappings
+   ```
+4. **Terraform Formatting, Initialization & Validation:**
+   ```text
+   > terraform fmt
+   > terraform validate
+   Success! The configuration is valid.
+   ```
+5. **Git Tracking & Repository Cleanliness:**
+   - Removed 2,865 tracked files from `Backend/node_modules/` in Git.
+   - Removed obsolete `Frontend/.env.production`.
+   - Tracked and committed `infrastructure/.terraform.lock.hcl`.
+
+### Non-Executed Tests (Local Environment Limitations)
+
+1. **Local Container Image Build (`docker build`) & Live `nginx -t`:**
+   - **Reason:** Docker Desktop daemon is not running on this Windows host (virtualization/Hyper-V/WSL2 permissions).
+   - **Target Execution:** Container builds and live Nginx tests execute natively on the target Ubuntu EC2 instance via the cloud-init script (`user_data.sh`) during deployment.
+2. **Live `terraform plan` / `apply`:**
+   - **Reason:** Requires active AWS credentials configured on the workstation. No AWS resources have been provisioned in the cloud.
+
+---
+
+## 9. EC2 Lifecycle: Manual Management via AWS Console
+
+### Start Procedure
+1. Open [AWS Management Console](https://console.aws.amazon.com/) $\rightarrow$ **EC2** $\rightarrow$ **Instances** $\rightarrow$ `axionlimit-server`.
+2. Click **Instance state** $\rightarrow$ **Start instance**.
+3. Copy the new **Public IPv4 address** (e.g. `13.234.120.45`).
+4. In [MongoDB Atlas Console](https://cloud.mongodb.com/) $\rightarrow$ **Network Access**, add `<PUBLIC_IP>/32`.
+5. Access AxionLimit at `http://<PUBLIC_IP>`.
+
+### Stop Procedure (Cost Optimization)
+1. Select `axionlimit-server` in the EC2 Console.
+2. Click **Instance state** $\rightarrow$ **Stop instance** (never *Terminate*).
+3. Compute and public IPv4 billing stop immediately ($0.00/hr). The 20 GB gp3 volume preserves all containers and Redis data for ~\$1.76/month.
+
+---
+
+## 10. Cost Breakdown (Mumbai `ap-south-1`)
 
 | Resource | Running State (24/7) | Stopped State (Default) | Cost Details |
 | :--- | :--- | :--- | :--- |
-| **EC2 `t3.small` (Standard)** | ~$15.18 / month | **$0.00 / month** | $0.0208/hour in `ap-south-1` (Billed only while running) |
-| **EBS Storage (20 GB gp3)** | ~$1.76 / month | **~$1.76 / month** | $0.088/GB-month (Preserves OS, Docker images & Redis data) |
-| **Dynamic Public IPv4** | ~$3.65 / month | **$0.00 / month** | $0.005/hour while running; **released ($0) when stopped** |
-| **MongoDB Atlas (M0 Shared)** | **$0.00** | **$0.00** | Free Tier cluster (512 MB storage) |
+| **EC2 `t3.small` (Standard)** | ~$15.18 / month | **$0.00 / month** | $0.0208/hour in `ap-south-1` |
+| **EBS Storage (20 GB gp3)** | ~$1.76 / month | **~$1.76 / month** | $0.088/GB-month |
+| **Dynamic Public IPv4** | ~$3.65 / month | **$0.00 / month** | $0.005/hour while running; **released when stopped** |
+| **MongoDB Atlas (M0 Shared)** | **$0.00** | **$0.00** | Free Tier cluster |
 | **TOTAL ESTIMATED MONTHLY:** | **~$20.60 / month** | **~$1.76 / month** | **>91% cost reduction when stopped** |
-
-> [!TIP]
-> **T3 Standard CPU Credit Protection:**
-> In `infrastructure/ec2.tf`, `cpu_credits = "standard"` is explicitly configured. If your instance runs out of banked CPU credits during heavy load, it will throttle to baseline performance rather than charging **$0.05 per vCPU-hour** surplus fees (T3 Unlimited mode).
-
----
-
-## 6. EC2 Lifecycle: Manual Management via AWS Console
-
-To avoid maintaining automation scripts, manage the EC2 instance lifecycle directly from the AWS Management Console:
-
-### How to Start the Application
-
-1. Log into the [AWS Management Console](https://console.aws.amazon.com/).
-2. Navigate to **EC2** $\rightarrow$ **Instances**.
-3. Select your instance (`axionlimit-server`).
-4. Click **Instance state** $\rightarrow$ **Start instance**.
-5. Wait ~30–60 seconds for the instance state to show **Running** and status checks to show **2/2 checks passed**.
-6. Note the new **Public IPv4 address** shown in the instance details (e.g. `13.234.120.45`).
-7. Access your application in your browser:
-   `http://<YOUR_EC2_PUBLIC_IP>`
-
-### How to Stop the Application (Save Money)
-
-When you are not actively testing or using the application:
-
-1. In the EC2 Console, select `axionlimit-server`.
-2. Click **Instance state** $\rightarrow$ **Stop instance** (do NOT click *Terminate*).
-3. The instance state changes to **Stopped**.
-   * Compute billing stops immediately ($0.00/hour).
-   * The dynamic IPv4 address is released back to AWS ($0.00/hour).
-   * Your 20 GB gp3 EBS volume preserves all container images, code, and Redis data (~$1.76/month).
-
-### Whitelisting Dynamic IP in MongoDB Atlas
-
-Because `use_elastic_ip = false` is configured to prevent stopped-state IPv4 charges, the EC2 instance receives a new public IPv4 address each time it is started:
-
-1. In the AWS Console, copy your EC2 instance's **Public IPv4 address**.
-2. Open the [MongoDB Atlas Console](https://cloud.mongodb.com/).
-3. Navigate to **Security** $\rightarrow$ **Network Access**.
-4. Click **Add IP Address**.
-5. Enter `<EC2_PUBLIC_IP>/32` and set comment to `AxionLimit EC2`.
-6. Click **Confirm**. (Atlas updates rules in ~15 seconds).
-
----
-
-## 7. Step-by-Step Initial Deployment Walkthrough
-
-### Step 1: Configure AWS CLI Credentials
-Ensure your local terminal has administrative AWS access:
-```powershell
-aws configure
-# AWS Access Key ID: <YOUR_KEY>
-# AWS Secret Access Key: <YOUR_SECRET>
-# Default region: ap-south-1
-# Default output format: json
-```
-
-### Step 2: Initialize & Review Terraform
-```powershell
-cd infrastructure
-terraform init
-terraform validate
-terraform plan
-```
-
-Review the plan. It will create **9 AWS resources**:
-- 1 VPC (`10.0.0.0/16`)
-- 1 Public Subnet (`10.0.1.0/24`)
-- 1 Internet Gateway
-- 1 Route Table & Association
-- 1 Security Group (Port 80 open)
-- 1 IAM Role & Instance Profile (with `AmazonSSMManagedInstanceCore`)
-- 1 EC2 Instance (`t3.small` with 20GB gp3 EBS)
-
-Apply the infrastructure when ready:
-```powershell
-terraform apply
-```
-
-### Step 3: Connect to EC2 & Set Up Application
-Connect to your EC2 instance using **AWS Systems Manager (SSM) Session Manager** (no SSH key or open port 22 required):
-1. In the AWS EC2 Console, select `axionlimit-server`.
-2. Click **Connect** $\rightarrow$ **Session Manager** $\rightarrow$ **Connect**.
-3. Once the terminal opens, switch to the `ubuntu` user and navigate to `/opt/axionlimit`:
-   ```bash
-   sudo su - ubuntu
-   cd /opt/axionlimit
-   ```
-4. Clone the repository:
-   ```bash
-   git clone https://github.com/<YOUR_USER>/AxionLimit.git .
-   ```
-5. Create the production environment file (`/opt/axionlimit/.env`):
-   ```bash
-   cat << 'EOF' > .env
-   PORT=5000
-   NODE_ENV=production
-   REDIS_URL=redis://redis:6379
-   MONGO_URI=mongodb+srv://<USER>:<PASS>@<CLUSTER>.mongodb.net/axionlimit?retryWrites=true&w=majority
-   JWT_SECRET=generate_a_secure_random_string_here_32chars
-   ENABLE_DEV_LOGIN=true
-   EC2_SERVER_NAME=EC2-Mumbai
-   EOF
-   ```
-6. Build and launch all three containers:
-   ```bash
-   docker compose -f docker-compose.prod.yml up -d --build
-   ```
-7. Verify all containers are running and healthy:
-   ```bash
-   docker compose -f docker-compose.prod.yml ps
-   curl http://localhost/health
-   ```
-
-### Step 4: Access the Application
-Open your browser and navigate to:
-`http://<YOUR_EC2_PUBLIC_IP>`
-
-You will see the AxionLimit Dashboard with full real-time telemetry, API key management, and documentation.
-
----
-
-## 8. Continuous Deployment with GitHub Actions (CI/CD)
-
-The repository includes [.github/workflows/deploy.yml](file:///.github/workflows/deploy.yml) which automatically runs tests and deploys code changes to your EC2 instance on every push to `main`.
-
-### Prerequisites for GitHub Actions
-1. In `infrastructure/variables.tf`, set `github_repo = "your-github-username/AxionLimit"` and run `terraform apply` to provision the GitHub OIDC role.
-2. In your GitHub repository, navigate to **Settings** $\rightarrow$ **Secrets and variables** $\rightarrow$ **Actions** and add:
-   - `AWS_ROLE_ARN`: The ARN output by Terraform (`github_actions_role_arn`).
-   - `AWS_REGION`: `ap-south-1`.
-   - `EC2_INSTANCE_ID`: Your EC2 instance ID (`i-0xxxxxxxxxxxxxxxxx`).
-
-### How the Pipeline Works
-1. Runs Backend unit tests (`npm test`).
-2. Obtains short-lived temporary AWS credentials using GitHub OIDC (zero permanent AWS access keys stored in GitHub).
-3. Sends an AWS Systems Manager (SSM) Run Command to EC2:
-   ```bash
-   cd /opt/axionlimit
-   git pull origin main
-   docker compose -f docker-compose.prod.yml up -d --build
-   curl -f http://localhost/health || exit 1
-   ```
-
----
-
-## 9. Troubleshooting Reference
-
-| Symptom | Cause | Resolution |
-| :--- | :--- | :--- |
-| **Browser shows `502 Bad Gateway`** | Backend container is starting or crashed | Run `docker logs axion-backend` on EC2. Verify MongoDB connection string in `.env`. |
-| **`HTTP 503 Service Unavailable` on `/health`** | Redis or MongoDB connection down | Check `docker ps` to ensure `axion-redis` is healthy. Check MongoDB Atlas Network Access allowlist for current EC2 IP. |
-| **Developer login fails with 403 Forbidden** | `ENABLE_DEV_LOGIN` not set to `true` | Add `ENABLE_DEV_LOGIN=true` to `/opt/axionlimit/.env` on EC2 and run `docker compose -f docker-compose.prod.yml up -d`. |
-| **GitHub Actions SSM command timeout** | SSM Agent inactive or IAM role missing | Verify EC2 has IAM role with `AmazonSSMManagedInstanceCore`. Verify outbound port 443 is open in Security Group. |
-| **Page reloads show 404 Not Found** | Nginx `try_files` missing | Verify `Frontend/nginx/default.conf` contains `try_files $uri $uri/ /index.html;`. |
-
----
-
-## 10. Permanent Teardown & Deletion
-
-If you wish to decommission all resources and ensure zero ongoing costs:
-
-1. **Disable Deletion Protection:**
-   In `infrastructure/ec2.tf`, set `prevent_destroy = false`.
-2. **Destroy Infrastructure:**
-   ```powershell
-   cd infrastructure
-   terraform destroy
-   ```
-3. **Delete Detached EBS Volume:**
-   Because `delete_on_termination = false` is configured to protect data from accidental EC2 termination, the 20 GB gp3 volume will remain in your AWS account in the `available` state.
-   - Go to **EC2** $\rightarrow$ **Elastic Block Store** $\rightarrow$ **Volumes**.
-   - Select the detached volume and choose **Actions** $\rightarrow$ **Delete volume**.
-4. **Delete MongoDB Atlas Cluster:**
-   Log into [MongoDB Atlas](https://cloud.mongodb.com/) and terminate your M0 free cluster.

@@ -30,6 +30,11 @@ enable_ssh = false
 # Only used when enable_ssh is true. NEVER leave as 0.0.0.0/0 in production.
 admin_ip = "0.0.0.0/0"
 
-# Optional GitHub repository for OIDC CI/CD deployment (e.g. "username/AxionLimit")
-# Leave empty if not using automated GitHub Actions CI/CD yet.
-github_repo = ""
+# GitHub repository configuration for OIDC CI/CD deployment
+# Set to your GitHub repository details to provision GitHub Actions OIDC role
+github_repo       = "kiranmukkamula/AxionLimit"
+github_repo_owner = "kiranmukkamula"
+github_repo_name  = "AxionLimit"
+github_owner_id   = "152879853"
+github_repo_id    = "1303665861"
+github_branch     = "main"

@@ -54,6 +54,36 @@ variable "admin_ip" {
 
 variable "github_repo" {
   type        = string
-  description = "GitHub repository for OIDC trust (e.g. 'owner/AxionLimit')"
-  default     = ""
+  description = "GitHub repository string for standard OIDC (e.g. 'kiranmukkamula/AxionLimit')"
+  default     = "kiranmukkamula/AxionLimit"
+}
+
+variable "github_repo_owner" {
+  type        = string
+  description = "GitHub account or organization login (e.g. 'kiranmukkamula')"
+  default     = "kiranmukkamula"
+}
+
+variable "github_repo_name" {
+  type        = string
+  description = "GitHub repository name (e.g. 'AxionLimit')"
+  default     = "AxionLimit"
+}
+
+variable "github_owner_id" {
+  type        = string
+  description = "GitHub account/org numeric ID for immutable OIDC subject claim (enforced after July 15, 2026)"
+  default     = "152879853"
+}
+
+variable "github_repo_id" {
+  type        = string
+  description = "GitHub repository numeric ID for immutable OIDC subject claim (enforced after July 15, 2026)"
+  default     = "1303665861"
+}
+
+variable "github_branch" {
+  type        = string
+  description = "Target git branch permitted to assume the AWS OIDC role"
+  default     = "main"
 }

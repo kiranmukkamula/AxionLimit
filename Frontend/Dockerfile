@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 1: Build React static assets using Node.js 18 Alpine
+# Stage 1: Build React static assets using Node.js 20 LTS Alpine
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -14,9 +14,9 @@ COPY . .
 RUN npm run build
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Stage 2: Serve static files and reverse proxy API with lightweight Nginx
+# Stage 2: Serve static files and reverse proxy API with Nginx 1.26 Alpine
 # ─────────────────────────────────────────────────────────────────────────────
-FROM nginx:1.25-alpine
+FROM nginx:1.26-alpine
 
 # Copy built production assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html

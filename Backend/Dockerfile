@@ -1,5 +1,5 @@
-# Use lightweight Node.js 18 Alpine image
-FROM node:18-alpine
+# Use Node.js 20 LTS Alpine image
+FROM node:20-alpine
 
 # Set working directory
 WORKDIR /usr/src/app
@@ -14,7 +14,7 @@ COPY --chown=node:node . .
 # Switch to standard unprivileged user
 USER node
 
-# Expose backend port
+# Expose backend port internally
 EXPOSE 5000
 
 # Set production environment defaults

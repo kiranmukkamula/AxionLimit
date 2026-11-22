@@ -4,7 +4,16 @@ const { getRedisClient } = require('../config/db');
 const { hashApiKey, isExpired } = require('../services/apiKeySecurity');
 require('dotenv').config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecret_axionlimit_key_12345!';
+const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: JWT_SECRET environment variable must be set in production mode.');
+    }
+    return 'dev-insecure-jwt-secret-do-not-use-in-production';
+  }
+  return secret;
+};
 
 const verifyJWT = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -15,7 +24,7 @@ const verifyJWT = (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, getJwtSecret());
     req.user = decoded;
     next();
   } catch (err) {
@@ -36,18 +45,17 @@ const enforceIpRules = (metadata, clientIp) => {
 };
 
 const verifyApiKey = async (req, res, next) => {
-  const suppliedApiKey = req.headers['x-api-key'];
+  const suppliedApiKey = req.headers['x-api-key'] || req.query.apiKey;
   const suppliedKeyId = req.headers['x-api-key-id'];
 
   if (!suppliedApiKey && !suppliedKeyId) {
     return res.status(401).json({ error: 'API key or Key ID is missing.' });
   }
 
+  // Security: Prioritize trusted Express req.ip (populated via Nginx reverse proxy)
+  // Do NOT allow untrusted external headers (e.g. x-user-ip, x-client-ip) to spoof IP addresses
   const clientIp = (
-    req.headers['x-user-ip'] ||
-    req.headers['x-client-ip'] ||
     req.ip ||
-    req.headers['x-forwarded-for']?.split(',')[0] ||
     req.socket?.remoteAddress ||
     '127.0.0.1'
   ).trim();
@@ -63,8 +71,8 @@ const verifyApiKey = async (req, res, next) => {
     req.body?.userId ||
     req.body?.user_id ||
     req.body?.identifier ||
-    ''
-  ).trim();
+    null
+  );
 
   const redisClient = getRedisClient();
 
@@ -76,158 +84,158 @@ const verifyApiKey = async (req, res, next) => {
       if (isGlobalIpBlacklisted || isUserIpBlacklisted) {
         return res.status(403).json({
           allowed: false,
-          reason: 'IP_TEMPORARILY_BLOCKED',
+          error: 'IP_QUARANTINED',
           message: isUserIpBlacklisted
             ? `User account '${endUserId}' on IP ${clientIp} has been quarantined due to automated burst abuse. Please try again in 1 hour.`
             : `Your IP address ${clientIp} has been quarantined due to automated burst abuse. Please try again in 1 hour.`
         });
       }
-    } catch (err) {
-      console.error('⚠️ Redis blacklist check error:', err);
+    } catch (blacklistErr) {
+      console.error('Redis blacklist check error:', blacklistErr);
     }
   }
 
-  // If Key ID was provided
   if (suppliedKeyId) {
-    // Attempt JWT extraction if authorization header is present
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    let userIdFromJwt = null;
     if (token) {
       try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        userIdFromJwt = decoded.userId;
+        const decoded = jwt.verify(token, getJwtSecret());
         req.user = decoded;
-      } catch (err) {
-        // Token invalid, proceed without req.user filtering
-      }
-    }
-
-    const apiKeyMetadataCacheKey = `apikey:id:${suppliedKeyId}`;
-    if (redisClient && redisClient.status === 'ready') {
-      try {
-        const cached = await redisClient.get(apiKeyMetadataCacheKey);
-        if (cached) {
-          const metadata = JSON.parse(cached);
-          if (metadata.isActive && !isExpired(metadata.expiresAt)) {
-            const ipCheck = enforceIpRules(metadata, clientIp);
-            if (!ipCheck.allowed) {
-              return res.status(403).json(ipCheck);
-            }
-            req.apiKeyMetadata = metadata;
-            return next();
-          }
-          await redisClient.del(apiKeyMetadataCacheKey);
-        }
-      } catch (cacheErr) {
-        console.error('⚠️ Redis cache read error for key ID:', cacheErr);
-      }
-    }
-
-    try {
-      const query = { _id: suppliedKeyId, isActive: true };
-      if (userIdFromJwt) query.userId = userIdFromJwt;
-      const apiKeyDocument = await ApiKey.findOne(query);
-
-      if (!apiKeyDocument || isExpired(apiKeyDocument.expiresAt)) {
-        return res.status(401).json({ error: 'Invalid, inactive, or unauthorized API key.' });
-      }
-
-      const apiKeyMetadata = {
-        keyHash: apiKeyDocument.keyHash || apiKeyDocument._id.toString(),
-        userId: apiKeyDocument.userId.toString(),
-        name: apiKeyDocument.name,
-        limit: apiKeyDocument.rateLimit.limit,
-        windowMs: apiKeyDocument.rateLimit.windowMs,
-        ipWhitelist: apiKeyDocument.ipWhitelist || [],
-        ipBlacklist: apiKeyDocument.ipBlacklist || [],
-        isActive: apiKeyDocument.isActive,
-        expiresAt: apiKeyDocument.expiresAt || null
-      };
-
-      if (redisClient && redisClient.status === 'ready') {
-        try {
-          await redisClient.set(apiKeyMetadataCacheKey, JSON.stringify(apiKeyMetadata), 'EX', 3600);
-        } catch (cacheErr) {
-          console.error('⚠️ Failed to write API key ID cache to Redis:', cacheErr);
-        }
-      }
-
-      const ipCheck = enforceIpRules(apiKeyMetadata, clientIp);
-      if (!ipCheck.allowed) {
-        return res.status(403).json(ipCheck);
-      }
-
-      req.apiKeyMetadata = apiKeyMetadata;
-      return next();
-    } catch (err) {
-      console.error('❌ Database error in API key ID auth:', err);
-      return res.status(500).json({ error: 'Internal server error validating API key.' });
-    }
-  }
-
-  // Raw API Key provided
-  const keyHash = hashApiKey(suppliedApiKey);
-  const apiKeyMetadataCacheKey = `apikey:${keyHash}`;
-
-  if (redisClient && redisClient.status === 'ready') {
-    try {
-      const cachedApiKeyMetadata = await redisClient.get(apiKeyMetadataCacheKey);
-      if (cachedApiKeyMetadata) {
-        const metadata = JSON.parse(cachedApiKeyMetadata);
-        if (metadata.isActive && !isExpired(metadata.expiresAt)) {
+        const apiKeyDoc = await ApiKey.findOne({ _id: suppliedKeyId, userId: decoded.userId });
+        if (apiKeyDoc) {
+          const metadata = {
+            id: apiKeyDoc._id,
+            keyHash: apiKeyDoc.keyHash,
+            name: apiKeyDoc.name,
+            userId: apiKeyDoc.userId,
+            isActive: apiKeyDoc.isActive,
+            expiresAt: apiKeyDoc.expiresAt,
+            limit: apiKeyDoc.rateLimit.limit,
+            windowMs: apiKeyDoc.rateLimit.windowMs,
+            ipWhitelist: apiKeyDoc.ipWhitelist,
+            ipBlacklist: apiKeyDoc.ipBlacklist,
+          };
           const ipCheck = enforceIpRules(metadata, clientIp);
           if (!ipCheck.allowed) {
-            return res.status(403).json(ipCheck);
+            return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
           }
           req.apiKeyMetadata = metadata;
           return next();
         }
-        await redisClient.del(apiKeyMetadataCacheKey);
+      } catch (e) {
+        // Fall through
       }
-    } catch (cacheReadError) {
-      console.error('⚠️ Redis cache read error in API key auth, falling back to DB:', cacheReadError);
+    }
+  }
+
+  const keyHash = hashApiKey(suppliedApiKey);
+
+  if (redisClient && redisClient.status === 'ready') {
+    try {
+      const cached = await redisClient.get(`apikey:${keyHash}`);
+      if (cached) {
+        const apiKeyMetadata = JSON.parse(cached);
+        if (!apiKeyMetadata.isActive) {
+          return res.status(403).json({ error: 'API key is inactive.' });
+        }
+        if (apiKeyMetadata.expiresAt && isExpired(apiKeyMetadata.expiresAt)) {
+          return res.status(403).json({ error: 'API key has expired.' });
+        }
+        const ipCheck = enforceIpRules(apiKeyMetadata, clientIp);
+        if (!ipCheck.allowed) {
+          return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
+        }
+        req.apiKeyMetadata = apiKeyMetadata;
+        return next();
+      }
+    } catch (redisErr) {
+      console.error('Redis API key cache error:', redisErr);
+    }
+  }
+
+  if (suppliedKeyId) {
+    try {
+      const apiKeyDoc = await ApiKey.findById(suppliedKeyId);
+      if (apiKeyDoc) {
+        const metadata = {
+          id: apiKeyDoc._id,
+          keyHash: apiKeyDoc.keyHash,
+          name: apiKeyDoc.name,
+          userId: apiKeyDoc.userId,
+          isActive: apiKeyDoc.isActive,
+          expiresAt: apiKeyDoc.expiresAt,
+          limit: apiKeyDoc.rateLimit.limit,
+          windowMs: apiKeyDoc.rateLimit.windowMs,
+          ipWhitelist: apiKeyDoc.ipWhitelist,
+          ipBlacklist: apiKeyDoc.ipBlacklist,
+        };
+        if (!metadata.isActive) {
+          return res.status(403).json({ error: 'API key is inactive.' });
+        }
+        if (metadata.expiresAt && isExpired(metadata.expiresAt)) {
+          return res.status(403).json({ error: 'API key has expired.' });
+        }
+        const ipCheck = enforceIpRules(metadata, clientIp);
+        if (!ipCheck.allowed) {
+          return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
+        }
+        req.apiKeyMetadata = metadata;
+        return next();
+      }
+    } catch (dbErr) {
+      console.error('Database API key lookup by ID error:', dbErr);
     }
   }
 
   try {
-    const apiKeyDocument = await ApiKey.findOne({ keyHash, isActive: true });
-
-    if (!apiKeyDocument || isExpired(apiKeyDocument.expiresAt)) {
-      return res.status(401).json({ error: 'Invalid or inactive API key.' });
+    const apiKeyDoc = await ApiKey.findOne({ keyHash });
+    if (!apiKeyDoc) {
+      return res.status(401).json({ error: 'Invalid API key provided.' });
+    }
+    if (!apiKeyDoc.isActive) {
+      return res.status(403).json({ error: 'API key is inactive.' });
+    }
+    if (apiKeyDoc.expiresAt && isExpired(apiKeyDoc.expiresAt)) {
+      return res.status(403).json({ error: 'API key has expired.' });
     }
 
     const apiKeyMetadata = {
-      keyHash: apiKeyDocument.keyHash,
-      userId: apiKeyDocument.userId.toString(),
-      name: apiKeyDocument.name,
-      limit: apiKeyDocument.rateLimit.limit,
-      windowMs: apiKeyDocument.rateLimit.windowMs,
-      ipWhitelist: apiKeyDocument.ipWhitelist || [],
-      ipBlacklist: apiKeyDocument.ipBlacklist || [],
-      isActive: apiKeyDocument.isActive,
-      expiresAt: apiKeyDocument.expiresAt || null
+      id: apiKeyDoc._id,
+      keyHash: apiKeyDoc.keyHash,
+      name: apiKeyDoc.name,
+      userId: apiKeyDoc.userId,
+      isActive: apiKeyDoc.isActive,
+      expiresAt: apiKeyDoc.expiresAt,
+      limit: apiKeyDoc.rateLimit.limit,
+      windowMs: apiKeyDoc.rateLimit.windowMs,
+      ipWhitelist: apiKeyDoc.ipWhitelist,
+      ipBlacklist: apiKeyDoc.ipBlacklist,
     };
-
-    if (redisClient && redisClient.status === 'ready') {
-      try {
-        await redisClient.set(apiKeyMetadataCacheKey, JSON.stringify(apiKeyMetadata), 'EX', 3600);
-      } catch (cacheErr) {
-        console.error('⚠️ Failed to write API key cache to Redis:', cacheErr);
-      }
-    }
 
     const ipCheck = enforceIpRules(apiKeyMetadata, clientIp);
     if (!ipCheck.allowed) {
-      return res.status(403).json(ipCheck);
+      return res.status(403).json({ allowed: false, error: ipCheck.reason, message: ipCheck.message });
+    }
+
+    if (redisClient && redisClient.status === 'ready') {
+      try {
+        await redisClient.setex(`apikey:${keyHash}`, 300, JSON.stringify(apiKeyMetadata));
+      } catch (cacheSetErr) {
+        console.error('Failed to cache API key in Redis:', cacheSetErr);
+      }
     }
 
     req.apiKeyMetadata = apiKeyMetadata;
-    next();
-  } catch (err) {
-    console.error('❌ Database error in API key auth:', err);
-    return res.status(500).json({ error: 'Internal server error validating API key.' });
+    return next();
+  } catch (dbErr) {
+    console.error('Database API key lookup error:', dbErr);
+    return res.status(500).json({ error: 'Authentication service unavailable.' });
   }
 };
 
-module.exports = { verifyJWT, verifyApiKey };
+module.exports = {
+  verifyJWT,
+  verifyApiKey,
+  getJwtSecret
+};

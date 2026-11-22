@@ -1,11 +1,10 @@
 const { getRedisClient } = require('../config/db');
 
-// Redis records #4–#8: shared dashboard telemetry.
-// - telemetry:total_requests     (counter)
-// - telemetry:allowed_requests   (counter)
-// - telemetry:blocked_requests   (counter)
-// - telemetry:top_users          (sorted set: API-key name → request count)
-// - telemetry:top_endpoints      (sorted set: endpoint → request count)
+// Rolling retention period for telemetry keys: 90 days in seconds
+const TELEMETRY_TTL_SECONDS = 90 * 86400;
+
+// Maximum cardinality for top rankings sorted sets to prevent unbounded memory growth
+const MAX_RANKINGS_ENTRIES = 100;
 
 const getTelemetryKeys = (ownerUserId = 'global') => {
   const prefix = `telemetry:${ownerUserId || 'global'}`;
@@ -41,6 +40,17 @@ const logAnalytics = async (identifier, endpoint, allowed, ownerUserId = 'global
 
     pipeline.zincrby(keys.topUsers, 1, activeIdentifier);
     pipeline.zincrby(keys.topEndpoints, 1, activeEndpoint);
+
+    // Bounded Retention: Retain only the top 100 members in sorted sets to prevent memory leaks from scanning/fuzzing
+    pipeline.zremrangebyrank(keys.topUsers, 0, -(MAX_RANKINGS_ENTRIES + 1));
+    pipeline.zremrangebyrank(keys.topEndpoints, 0, -(MAX_RANKINGS_ENTRIES + 1));
+
+    // Rolling TTL: Set 90-day retention on all keys so abandoned accounts expire and keys become evictable under volatile-lru
+    pipeline.expire(keys.total, TELEMETRY_TTL_SECONDS);
+    pipeline.expire(keys.allowed, TELEMETRY_TTL_SECONDS);
+    pipeline.expire(keys.blocked, TELEMETRY_TTL_SECONDS);
+    pipeline.expire(keys.topUsers, TELEMETRY_TTL_SECONDS);
+    pipeline.expire(keys.topEndpoints, TELEMETRY_TTL_SECONDS);
 
     await pipeline.exec();
   } catch (err) {

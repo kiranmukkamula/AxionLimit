@@ -2,17 +2,16 @@ const express = require('express');
 const passport = require('passport');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { verifyJWT } = require('../middleware/auth');
+const { verifyJWT, getJwtSecret } = require('../middleware/auth');
 require('../config/passport');
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecret_axionlimit_key_12345!';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const generateToken = (user) => {
   return jwt.sign(
     { userId: user._id, email: user.email, name: user.name },
-    JWT_SECRET,
+    getJwtSecret(),
     { expiresIn: '7d' }
   );
 };
@@ -33,10 +32,10 @@ router.get('/google/callback', passport.authenticate('google', { failureRedirect
 );
 
 router.post('/dev-login', async (req, res) => {
-  // In production environments, dev-login is disabled by default unless explicitly enabled
+  // Developer mock login is strictly disabled in production unless explicitly enabled via ENABLE_DEV_LOGIN=true
   if (process.env.NODE_ENV === 'production' && process.env.ENABLE_DEV_LOGIN !== 'true') {
     return res.status(403).json({
-      error: 'Developer mock login is disabled in production mode. Set ENABLE_DEV_LOGIN=true to enable for testing.'
+      error: 'Developer mock login is disabled in production.'
     });
   }
 
@@ -92,4 +91,3 @@ router.get('/me', verifyJWT, async (req, res) => {
 });
 
 module.exports = router;
-

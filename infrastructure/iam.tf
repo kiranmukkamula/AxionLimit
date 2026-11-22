@@ -50,6 +50,10 @@ resource "aws_iam_role" "github_actions" {
   count = var.github_repo != "" ? 1 : 0
   name  = "${var.project_name}-github-actions-role"
 
+  # Trust Policy: Matches GitHub OIDC tokens strictly on the 'main' branch.
+  # Accounts for GitHub's immutable subject claim format:
+  # repo:owner@owner_id/repo@repo_id:ref:refs/heads/<branch>
+  # (automatically enforced for all repositories created after July 15, 2026).
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -62,9 +66,10 @@ resource "aws_iam_role" "github_actions" {
         Condition = {
           StringEquals = {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          }
-          StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:*"
+            "token.actions.githubusercontent.com:sub" = [
+              "repo:${var.github_repo_owner}@${var.github_owner_id}/${var.github_repo_name}@${var.github_repo_id}:ref:refs/heads/${var.github_branch}",
+              "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
+            ]
           }
         }
       }
@@ -76,7 +81,7 @@ resource "aws_iam_role" "github_actions" {
   }
 }
 
-# Policy for GitHub Actions to trigger SSM deployments on EC2
+# Least-Privilege Policy for GitHub Actions to trigger SSM deployments on EC2
 resource "aws_iam_role_policy" "github_actions_policy" {
   count = var.github_repo != "" ? 1 : 0
   name  = "${var.project_name}-github-actions-deploy-policy"
@@ -86,17 +91,23 @@ resource "aws_iam_role_policy" "github_actions_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "SSMDeployment"
+        Sid    = "SSMSendCommand"
         Effect = "Allow"
         Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation",
-          "ssm:ListCommands"
+          "ssm:SendCommand"
         ]
         Resource = [
           "arn:aws:ssm:${var.aws_region}:*:document/AWS-RunShellScript",
           aws_instance.server.arn
         ]
+      },
+      {
+        Sid    = "SSMGetInvocation"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation"
+        ]
+        Resource = "*"
       }
     ]
   })
