@@ -1,3 +1,4 @@
+
 name: AxionLimit Continuous Deployment
 
 on:
@@ -16,25 +17,28 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  id-token: write   # Required for requesting the OIDC JWT token
-  contents: read    # Required for actions/checkout
+  id-token: write
+  contents: read
 
 jobs:
-  # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 1: Automated Unit Tests (Runs on both push and workflow_dispatch)
-  # ───────────────────────────────────────────────────────────────────────────
+
+  # ============================================================
+  # STAGE 1: BACKEND TESTS
+  # ============================================================
+
   test:
     name: Run Unit Tests
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 24 LTS
+      - name: Setup Node.js 24
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: Backend/package-lock.json
 
       - name: Install Backend Dependencies
@@ -47,88 +51,152 @@ jobs:
           cd Backend
           npm test
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # STAGE 2: Deploy Multi-Container Stack to EC2 via AWS Systems Manager (SSM)
-  # (Strictly gated to manual workflow_dispatch triggers only)
-  # ───────────────────────────────────────────────────────────────────────────
+  # ============================================================
+  # STAGE 2: DEPLOY TO EC2 THROUGH AWS SSM
+  # ============================================================
+
   deploy:
     name: Deploy to Single EC2 Host
     needs: test
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
+
+      # --------------------------------------------------------
+      # 1. AWS OIDC AUTHENTICATION
+      # --------------------------------------------------------
+
       - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION || 'ap-south-1' }}
 
-      - name: Pre-Flight Check - Verify EC2 Instance State
+      # --------------------------------------------------------
+      # 2. EC2 INSTANCE CHECK
+      # --------------------------------------------------------
+
+      - name: Verify EC2 Instance State
         run: |
-          echo "Checking EC2 instance status for instance: ${{ secrets.EC2_INSTANCE_ID }}..."
           INSTANCE_STATE=$(aws ec2 describe-instances \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --query "Reservations[0].Instances[0].State.Name" \
-            --output text)
+            --output text \
+            --region "$AWS_REGION")
 
-          echo "EC2 Instance state: $INSTANCE_STATE"
+          echo "EC2 state: $INSTANCE_STATE"
+
           if [ "$INSTANCE_STATE" != "running" ]; then
-            echo "❌ Deployment aborted: EC2 instance ${{ secrets.EC2_INSTANCE_ID }} is not running (current state: $INSTANCE_STATE)."
-            echo "Please start the instance via AWS Console or CLI before running deployment."
+            echo "EC2 instance is not running."
             exit 1
           fi
 
-      - name: Pre-Flight Check - Verify SSM Agent Connectivity
+      # --------------------------------------------------------
+      # 3. SSM CONNECTIVITY CHECK
+      # --------------------------------------------------------
+
+      - name: Verify SSM Agent Connectivity
         run: |
-          echo "Checking SSM Agent connectivity for instance: ${{ secrets.EC2_INSTANCE_ID }}..."
           SSM_STATUS=$(aws ssm describe-instance-information \
             --filters "Key=InstanceIds,Values=${{ secrets.EC2_INSTANCE_ID }}" \
             --query "InstanceInformationList[0].PingStatus" \
-            --output text)
+            --output text \
+            --region "$AWS_REGION")
 
-          echo "SSM Agent ping status: $SSM_STATUS"
+          echo "SSM status: $SSM_STATUS"
+
           if [ "$SSM_STATUS" != "Online" ]; then
-            echo "❌ Deployment aborted: SSM Agent on instance ${{ secrets.EC2_INSTANCE_ID }} is not Online (status: $SSM_STATUS)."
-            echo "Ensure the instance is booted, outbound port 443 is accessible, and the amazon-ssm-agent service is running."
+            echo "SSM agent is not online."
             exit 1
           fi
 
-      - name: Store Production Secrets in SSM Parameter Store
+      # --------------------------------------------------------
+      # 4. STORE SECRETS IN SSM PARAMETER STORE
+      # --------------------------------------------------------
+
+      - name: Store Production Secrets in SSM
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
         run: |
-          echo "Writing MONGO_URI and JWT_SECRET securely to AWS SSM Parameter Store..."
+          set -euo pipefail
+
+          test -n "$MONGO_URI" || {
+            echo "MONGO_URI GitHub secret is missing."
+            exit 1
+          }
+
+          test -n "$JWT_SECRET" || {
+            echo "JWT_SECRET GitHub secret is missing."
+            exit 1
+          }
+
           aws ssm put-parameter \
             --name "/axionlimit/prod/MONGO_URI" \
-            --value "${{ secrets.MONGO_URI }}" \
-            --type "SecureString" \
-            --overwrite
+            --value "$MONGO_URI" \
+            --type SecureString \
+            --overwrite \
+            --region "$AWS_REGION" \
+            --output json > /dev/null
+
           aws ssm put-parameter \
             --name "/axionlimit/prod/JWT_SECRET" \
-            --value "${{ secrets.JWT_SECRET }}" \
-            --type "SecureString" \
-            --overwrite
-          echo "✔ Secrets stored in SSM Parameter Store (values masked)."
+            --value "$JWT_SECRET" \
+            --type SecureString \
+            --overwrite \
+            --region "$AWS_REGION" \
+            --output json > /dev/null
 
-      - name: Trigger Remote Deployment via AWS SSM Run Command
+          echo "Production secrets stored successfully."
+
+      # --------------------------------------------------------
+      # 5. SEND DEPLOYMENT COMMAND TO EC2
+      # --------------------------------------------------------
+
+      - name: Trigger Remote Deployment via SSM
         run: |
-          echo "Sending deployment script to EC2 instance: ${{ secrets.EC2_INSTANCE_ID }}..."
+
+          set -euo pipefail
+
+          echo "Sending deployment script to EC2..."
+
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
+
               "set -e",
+
               "if [ ! -d \"/opt/axionlimit/.git\" ] || ! sudo -u ubuntu -H git -C /opt/axionlimit rev-parse --is-inside-work-tree >/dev/null 2>&1; then",
-              "  echo \"Bootstrapping repository in /opt/axionlimit...\"",
+              "  echo \"Bootstrapping repository...\"",
               "  rm -rf /opt/axionlimit",
               "  install -d -o ubuntu -g ubuntu /opt/axionlimit",
               "  sudo -u ubuntu -H git clone https://github.com/kiranmukkamula/AxionLimit.git /opt/axionlimit",
               "fi",
-              "sudo -u ubuntu -H git -C /opt/axionlimit fetch origin main",
-              "sudo -u ubuntu -H git -C /opt/axionlimit checkout --force '${{ github.sha }}'",
+
+              "sudo -u ubuntu -H git -C /opt/axionlimit fetch --prune origin main",
+              "sudo -u ubuntu -H git -C /opt/axionlimit checkout --force ${{ github.sha }}",
+
               "cd /opt/axionlimit",
-              "echo \"Retrieving production secrets from AWS SSM Parameter Store...\"",
-              "MONGO_URI_VAL=$(aws ssm get-parameter --name \"/axionlimit/prod/MONGO_URI\" --with-decryption --query \"Parameter.Value\" --output text)",
-              "JWT_SECRET_VAL=$(aws ssm get-parameter --name \"/axionlimit/prod/JWT_SECRET\" --with-decryption --query \"Parameter.Value\" --output text)",
-              "EC2_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4 || echo \"\")",
+
+              "export AWS_DEFAULT_REGION=ap-south-1",
+              "export AWS_REGION=ap-south-1",
+
+              "echo \"Retrieving production secrets...\"",
+
+              "MONGO_URI_VAL=$(aws ssm get-parameter --region ap-south-1 --name \"/axionlimit/prod/MONGO_URI\" --with-decryption --query \"Parameter.Value\" --output text)",
+
+              "JWT_SECRET_VAL=$(aws ssm get-parameter --region ap-south-1 --name \"/axionlimit/prod/JWT_SECRET\" --with-decryption --query \"Parameter.Value\" --output text)",
+
+              "IMDS_TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H \"X-aws-ec2-metadata-token-ttl-seconds: 21600\")",
+
+              "EC2_IP=$(curl -fsS -H \"X-aws-ec2-metadata-token: $IMDS_TOKEN\" http://169.254.169.254/latest/meta-data/public-ipv4)",
+
+              "umask 077",
+
               "cat <<EOF > /opt/axionlimit/.env",
               "NODE_ENV=production",
               "PORT=5000",
@@ -139,42 +207,109 @@ jobs:
               "ENABLE_DEV_LOGIN=false",
               "EC2_SERVER_NAME=EC2-Mumbai",
               "EOF",
+
               "chmod 600 /opt/axionlimit/.env",
-              "echo \"Building and starting production containers...\"",
-              "docker compose -f docker-compose.prod.yml up -d --build",
-              "sleep 10",
-              "curl -f http://localhost/health || exit 1",
-              "echo \"✔ AxionLimit deployment succeeded and verified healthy!\""
+
+              "echo \"Validating Docker Compose configuration...\"",
+
+              "docker compose --parallel 1 -f docker-compose.prod.yml config --quiet",
+
+              "echo \"Building and starting containers...\"",
+
+              "docker compose --parallel 1 -f docker-compose.prod.yml up -d --build",
+
+              "echo \"Waiting for application health check...\"",
+
+              "for attempt in $(seq 1 120); do",
+
+              "  if curl -fsS -o /tmp/axionlimit-health.json http://localhost/health 2>/dev/null; then",
+              "    cat /tmp/axionlimit-health.json",
+              "    echo \"AxionLimit health check passed!\"",
+              "    exit 0",
+              "  fi",
+
+              "  echo \"Health check attempt $attempt/120 failed. Retrying in 10 seconds...\"",
+
+              "  sleep 10",
+
+              "done",
+
+              "echo \"Health check failed after 20 minutes.\"",
+
+              "docker compose -f docker-compose.prod.yml ps",
+
+              "docker compose -f docker-compose.prod.yml logs --tail=80 backend redis frontend || true",
+
+              "exit 1"
+
             ]' \
+            --region "$AWS_REGION" \
             --query "Command.CommandId" \
             --output text)
 
-          echo "Command sent. Command ID: $COMMAND_ID. Waiting for execution result..."
+          echo "SSM Command ID: $COMMAND_ID"
 
-          aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" || true
+          # ----------------------------------------------------
+          # 6. WAIT FOR REMOTE EXECUTION
+          # ----------------------------------------------------
 
-          INVOCATION=$(aws ssm get-command-invocation \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-            --output json)
+          INVOCATION=""
+          STATUS="Pending"
 
-          STATUS=$(echo "$INVOCATION" | jq -r '.Status')
-          RESPONSE=$(echo "$INVOCATION" | jq -r '.ResponseCode')
+          for attempt in $(seq 1 120); do
 
-          echo "Remote execution status: $STATUS"
-          echo "Remote response code: $RESPONSE"
+            INVOCATION=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+              --region "$AWS_REGION" \
+              --output json 2>/dev/null || true)
 
-          echo "========== EC2 STANDARD OUTPUT =========="
-          echo "$INVOCATION" | jq -r '.StandardOutputContent // empty'
+            if [ -n "$INVOCATION" ]; then
+              STATUS=$(printf '%s\n' "$INVOCATION" | jq -r '.Status // "Pending"' 2>/dev/null || echo "Pending")
+            else
+              STATUS="Pending"
+            fi
 
-          echo "========== EC2 STANDARD ERROR =========="
-          echo "$INVOCATION" | jq -r '.StandardErrorContent // empty'
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut|DeliveryTimedOut|ExecutionTimedOut|Undeliverable|Terminated)
+                break
+                ;;
+            esac
+
+            if (( attempt % 6 == 0 )); then
+              echo "SSM execution status: $STATUS (attempt $attempt/120)"
+            fi
+
+            sleep 10
+
+          done
+
+          # ----------------------------------------------------
+          # 7. PRINT REMOTE EXECUTION DETAILS
+          # ----------------------------------------------------
+
+          if [ -n "$INVOCATION" ]; then
+
+            RESPONSE=$(printf '%s\n' "$INVOCATION" | jq -r '.ResponseCode // "N/A"')
+
+            echo "Remote execution status: $STATUS"
+            echo "Remote response code: $RESPONSE"
+
+            echo "========== EC2 STANDARD OUTPUT =========="
+            printf '%s\n' "$INVOCATION" | jq -r '.StandardOutputContent // empty'
+
+            echo "========== EC2 STANDARD ERROR =========="
+            printf '%s\n' "$INVOCATION" | jq -r '.StandardErrorContent // empty'
+
+          else
+
+            echo "Could not retrieve SSM invocation details."
+
+          fi
 
           if [ "$STATUS" != "Success" ]; then
-            echo "Deployment failed on EC2."
+            echo "EC2 deployment failed or timed out."
             exit 1
           fi
 
-          echo "AxionLimit deployment succeeded and healthcheck passed!"
+          echo "AxionLimit deployment completed successfully!"
